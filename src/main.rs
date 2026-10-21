@@ -2,17 +2,105 @@
 #![expect(
     dead_code,
     unused_imports,
-    reason = "the HTTP layer that uses these modules comes in a later stage"
+    reason = "parts used by the sign-in and protocol endpoints of later stages"
 )]
-#![cfg_attr(not(test), expect(unused_macros, reason = "the same"))]
 
+mod config;
 mod crypto;
 mod encoding;
 mod form;
 mod html;
+mod http;
+mod log;
 mod secret;
 mod store;
 mod time;
 mod uri;
+mod web;
 
-fn main() {}
+use std::io::Write as _;
+use std::process::ExitCode;
+use std::sync::Arc;
+
+use crate::config::Config;
+use crate::crypto::MasterKey;
+use crate::log::{error, info};
+use crate::store::Db;
+use crate::web::App;
+
+const USAGE: &str = "\
+Usage: unlatch [command]
+
+Commands:
+  serve          Run the server (the default). Configured by environment variables;
+                 see docs/configuration.md.
+  generate-key   Print a new master key for UNLATCH_KEY_FILE.
+  help           Show this message.
+";
+
+fn main() -> ExitCode {
+    let command = std::env::args().nth(1);
+    match command.as_deref() {
+        None | Some("serve") => serve(),
+        Some("generate-key") => match MasterKey::generate() {
+            Ok(key) => print(&format!("{key}\n")),
+            Err(e) => {
+                error!("{e}");
+                ExitCode::FAILURE
+            }
+        },
+        Some("help" | "--help" | "-h") => print(USAGE),
+        Some(other) => {
+            error!("unknown command {other:?}\n\n{USAGE}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn print(text: &str) -> ExitCode {
+    match std::io::stdout().write_all(text.as_bytes()) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(_) => ExitCode::FAILURE,
+    }
+}
+
+fn serve() -> ExitCode {
+    let config = match Config::from_env() {
+        Ok(config) => config,
+        Err(e) => {
+            error!("{e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    log::set_level(config.log_level);
+    // Two workers are plenty for sign-ins and keep memory low; password hashing runs on the
+    // blocking pool and the database on its own thread.
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build();
+    let result = match runtime {
+        Ok(runtime) => runtime.block_on(run(config)),
+        Err(e) => Err(format!("can't start the async runtime: {e}")),
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            error!("{e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+async fn run(config: Config) -> Result<(), String> {
+    let db = Db::open(&config.database).map_err(|e| e.to_string())?;
+    let listener = http::bind(config.listen).await.map_err(|e| e.to_string())?;
+    let app = Arc::new(App::new(config, db).await.map_err(|e| e.to_string())?);
+    info!(
+        "listening on {} as {}",
+        app.config.listen,
+        app.config.issuer.as_str()
+    );
+    http::serve(app, listener).await;
+    Ok(())
+}

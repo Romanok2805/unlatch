@@ -60,7 +60,7 @@ as an open redirect.
 |---|---|---|---|
 | Authorization code | Random | 60 seconds | Everything issued from it is revoked |
 | Access token | JWT | 5 minutes | Nothing happens; it is a bearer token |
-| Refresh token | Random | Until the session ends | The whole session is revoked |
+| Refresh token | Sealed, not stored | Until the session ends | The grant is revoked |
 | ID token | JWT | 5 minutes | Nothing happens; it only proves sign-in |
 
 Access tokens have `typ: at+jwt` (RFC 9068). A service can check them without asking Unlatch, and an
@@ -142,10 +142,13 @@ configuration, and after sign-in the user is sent back only to the host they cam
 
 ## Storage
 
-The database is SQLite in WAL mode. One thread owns the connection that writes and a few connections
-serve reads, so the async runtime never waits on the disk.
+The database is SQLite in WAL mode. One thread owns the only connection and runs the queries that
+request handlers send it, so the async runtime never waits on the disk and queries never
+interleave. For a single organisation that is fast enough and keeps memory low.
 
-Codes, tokens, sessions and recovery codes are stored only as hashes. TOTP secrets, the client
+Codes, sessions and recovery codes are stored only as hashes. Refresh tokens aren't stored at all:
+each is sealed and names its grant and a generation number, and the database keeps only the
+current generation. An older generation means the token was copied, so the grant is revoked. TOTP secrets, the client
 secrets for outside providers and the private signing keys are encrypted with AES-256-GCM. The key
 for that is read from a file or an environment variable, never from the database, so a stolen
 database file is not enough to use them.
@@ -179,10 +182,13 @@ regressions get noticed.
 |---|---|---|
 | HTTP | `hyper`, `tokio` | A home-made HTTP parser is an easy way to get request smuggling. |
 | TLS | `rustls` | Needed to talk to outside providers anyway. |
-| Cryptography | `ring` | Widely used, reviewed implementations of signatures, encryption, HMAC, hashing and random numbers. |
-| Passwords | `argon2` | `ring` has no Argon2. |
+| Cryptography | `aws-lc-rs` | Reviewed implementations of signatures, encryption, HMAC, hashing and random numbers, including RSA key generation, which RS256 needs and `ring` lacks. |
+| Passwords | `argon2` | `aws-lc-rs` has no Argon2. |
 | Database | `rusqlite` with bundled SQLite | SQLite is very well tested; we only need the binding. |
-| Configuration and JSON | `serde`, `serde_json`, `toml` | Parsers are easy to get wrong. Unknown fields are rejected. |
+| JSON | `serde`, `serde_json` | Parsers are easy to get wrong. |
+
+Configuration comes from environment variables, so no configuration file format is needed; see
+[configuration.md](configuration.md).
 
 We write the small parts ourselves when that is easier to review than a dependency: JWS for the
 algorithms we accept, base64url, form decoding, TOTP, migrations, logging and HTML templates.
