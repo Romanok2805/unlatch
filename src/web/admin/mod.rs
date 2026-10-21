@@ -7,6 +7,7 @@
 mod apps;
 mod groups;
 mod lists;
+mod providers;
 mod settings;
 mod users;
 
@@ -156,6 +157,8 @@ pub(crate) async fn route(app: &App, request: &Request) -> Result<Option<Respons
         ("groups", Some(id)) => return groups::edit(app, request, &admin, id).await,
         ("sessions", None) => lists::sessions(app, request, &admin).await?,
         ("log", None) if !post => lists::log(app, request, &admin).await?,
+        ("providers", None) if !post => providers::list(app, request, &admin).await?,
+        ("providers", Some(id)) => return providers::edit(app, request, &admin, id).await,
         ("settings", None) => settings::page(app, request, &admin).await?,
         _ => return Ok(None),
     };

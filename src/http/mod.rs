@@ -3,6 +3,7 @@
 pub(crate) mod client;
 pub(crate) mod cookie;
 mod server;
+pub(crate) mod tls;
 
 use std::net::IpAddr;
 use std::time::Duration;

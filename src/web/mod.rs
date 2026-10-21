@@ -7,6 +7,7 @@ mod i18n;
 mod layout;
 mod limits;
 mod oidc;
+mod providers;
 mod qr;
 mod session;
 mod session_table;
@@ -14,7 +15,7 @@ pub(crate) mod setup;
 mod signin;
 mod static_files;
 
-use std::sync::{Arc, PoisonError, RwLock};
+use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
 use hyper::{Method, StatusCode, header};
 use tokio::sync::Semaphore;
@@ -44,6 +45,7 @@ pub(crate) struct App {
     signing: RwLock<Arc<KeyRing>>,
     /// For requests to sign-in providers and back-channel logout.
     pub(crate) client: Arc<Client>,
+    provider_cache: Mutex<providers::Cache>,
 }
 
 const HASHING_SLOTS: usize = 2;
@@ -121,6 +123,7 @@ impl App {
             branding: RwLock::new(branding),
             signing: RwLock::new(Arc::new(ring)),
             client: Arc::new(Client::new().map_err(|_| Failure::Crypto(CryptoError))?),
+            provider_cache: Mutex::default(),
         })
     }
 
@@ -250,6 +253,10 @@ async fn dispatch(app: &App, request: &Request) -> Result<Option<Response>, Fail
         "/revoke" if post => oidc::revoke(app, request).await?,
         "/end-session" if get || post => oidc::end_session(app, request).await?,
         "/account/sessions" if post => account::end_session(app, request).await?,
+        "/account/providers" if post => providers::manage(app, request).await?,
+        path if get && path.starts_with("/login/") => {
+            return provider_route(app, request, path).await;
+        }
         path if path == "/admin" || path.starts_with("/admin/") => {
             return admin::route(app, request).await;
         }
@@ -257,6 +264,20 @@ async fn dispatch(app: &App, request: &Request) -> Result<Option<Response>, Fail
         _ => return Ok(None),
     };
     Ok(Some(response))
+}
+
+/// `/login/<slug>` and `/login/<slug>/callback` of a sign-in provider.
+async fn provider_route(
+    app: &App,
+    request: &Request,
+    path: &str,
+) -> Result<Option<Response>, Failure> {
+    let rest = path.strip_prefix("/login/").unwrap_or_default();
+    match rest.split_once('/') {
+        None => providers::start(app, request, rest).await,
+        Some((slug, "callback")) => providers::callback(app, request, slug).await,
+        Some(_) => Ok(None),
+    }
 }
 
 async fn home(app: &App, request: &Request) -> Result<Response, Failure> {

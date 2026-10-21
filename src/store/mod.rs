@@ -8,6 +8,7 @@ pub(crate) mod apps;
 pub(crate) mod audit;
 pub(crate) mod grants;
 pub(crate) mod groups;
+pub(crate) mod providers;
 pub(crate) mod sessions;
 pub(crate) mod settings;
 pub(crate) mod signing_keys;

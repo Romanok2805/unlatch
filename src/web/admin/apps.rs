@@ -726,7 +726,7 @@ fn credentials_section(
 }
 
 /// A host name, optionally with a port, in lowercase: what `X-Forwarded-Host` will carry.
-fn parse_host(text: &str) -> Option<String> {
+pub(super) fn parse_host(text: &str) -> Option<String> {
     let (name, port) = text
         .split_once(':')
         .map_or((text, None), |(name, port)| (name, Some(port)));

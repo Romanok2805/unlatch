@@ -11,7 +11,7 @@ use aws_lc_rs::{constant_time, digest, rand};
 
 use crate::encoding::base64url;
 
-pub(crate) use jws::{Algorithm, Jwk, SigningKey, VerifyingKey, verify_jwt};
+pub(crate) use jws::{Algorithm, Jwk, JwtError, SigningKey, VerifyingKey, verify_jwt};
 pub(crate) use master_key::{MacKey, MasterKey, SealingKey};
 
 /// A cryptographic operation failed. The library doesn't say why, and nothing we could do with a

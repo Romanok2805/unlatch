@@ -1,16 +1,39 @@
 # Anything not allowed here fails CI. Changing this file needs a reason in the pull request.
 
+[graph]
+# The platforms Unlatch is built for; dependencies of others, such as WebAssembly, don't ship.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-unknown-linux-musl",
+    "aarch64-unknown-linux-musl",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+
 [advisories]
 ignore = []
 
 [licenses]
 # Licenses compatible with distributing Unlatch under MIT.
-allow = ["MIT", "Apache-2.0", "ISC", "BSD-3-Clause", "Unicode-3.0"]
+allow = [
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Zlib",
+]
 confidence-threshold = 0.93
 
 [bans]
 multiple-versions = "deny"
 wildcards = "deny"
+skip = [
+    { crate = "untrusted@0.7.1", reason = "aws-lc-rs and rustls-webpki depend on different versions" },
+]
 
 [sources]
 unknown-registry = "deny"

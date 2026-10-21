@@ -5,6 +5,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 
 use crate::crypto::MasterKey;
+use crate::http::tls::TlsFiles;
 use crate::log::Level;
 
 pub(crate) struct Config {
@@ -14,6 +15,8 @@ pub(crate) struct Config {
     pub(crate) master_key: MasterKey,
     pub(crate) trusted_proxies: Vec<Cidr>,
     pub(crate) log_level: Level,
+    /// Set to serve TLS without a reverse proxy.
+    pub(crate) tls: Option<TlsFiles>,
 }
 
 #[derive(Debug)]
@@ -81,6 +84,19 @@ impl Config {
             })?,
         };
 
+        let tls = match (get("UNLATCH_TLS_CERT"), get("UNLATCH_TLS_KEY")) {
+            (Some(certificate), Some(key)) => Some(TlsFiles {
+                certificate: PathBuf::from(certificate),
+                key: PathBuf::from(key),
+            }),
+            (None, None) => None,
+            _ => {
+                return Err(ConfigError(
+                    "set both UNLATCH_TLS_CERT and UNLATCH_TLS_KEY, or neither".into(),
+                ));
+            }
+        };
+
         Ok(Self {
             issuer,
             listen,
@@ -89,6 +105,7 @@ impl Config {
             master_key,
             trusted_proxies,
             log_level,
+            tls,
         })
     }
 }

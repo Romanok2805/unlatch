@@ -13,6 +13,7 @@ use hyper::service::service_fn;
 use hyper_util::rt::{TokioIo, TokioTimer};
 use tokio::net::TcpListener;
 use tokio::sync::Semaphore;
+use tokio_rustls::TlsAcceptor;
 
 use super::{Request, Response};
 use crate::log::{info, warning};
@@ -29,7 +30,7 @@ const MAX_HEAD: usize = 16 * 1024;
 /// How long open connections get to finish when the server stops.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
 
-pub(crate) async fn serve(app: Arc<App>, listener: TcpListener) {
+pub(crate) async fn serve(app: Arc<App>, listener: TcpListener, tls: Option<TlsAcceptor>) {
     let connections = Arc::new(Semaphore::new(
         usize::try_from(MAX_CONNECTIONS).unwrap_or(1),
     ));
@@ -52,27 +53,44 @@ pub(crate) async fn serve(app: Arc<App>, listener: TcpListener) {
         let Ok(permit) = Arc::clone(&connections).try_acquire_owned() else {
             continue;
         };
-        let app = Arc::clone(&app);
+        let (app, tls) = (Arc::clone(&app), tls.clone());
         tokio::spawn(async move {
-            let service = service_fn(move |request| {
-                let app = Arc::clone(&app);
-                async move { Ok::<_, Infallible>(handle(&app, request, peer.ip()).await) }
-            });
-            // Errors here are clients going away or breaking the protocol; nothing to act on.
-            drop(
-                http1::Builder::new()
-                    .timer(TokioTimer::new())
-                    .header_read_timeout(HEADER_TIMEOUT)
-                    .max_buf_size(MAX_HEAD)
-                    .serve_connection(TokioIo::new(stream), service)
-                    .await,
-            );
+            match tls {
+                None => serve_connection(app, TokioIo::new(stream), peer).await,
+                Some(acceptor) => {
+                    // The handshake gets the same time limit as the headers.
+                    if let Ok(Ok(stream)) =
+                        tokio::time::timeout(HEADER_TIMEOUT, acceptor.accept(stream)).await
+                    {
+                        serve_connection(app, TokioIo::new(stream), peer).await;
+                    }
+                }
+            }
             drop(permit);
         });
     }
 
     info!("stopping; waiting for open connections");
     drop(tokio::time::timeout(SHUTDOWN_GRACE, connections.acquire_many(MAX_CONNECTIONS)).await);
+}
+
+async fn serve_connection<I>(app: Arc<App>, io: I, peer: std::net::SocketAddr)
+where
+    I: hyper::rt::Read + hyper::rt::Write + Unpin + Send + 'static,
+{
+    let service = service_fn(move |request| {
+        let app = Arc::clone(&app);
+        async move { Ok::<_, Infallible>(handle(&app, request, peer.ip()).await) }
+    });
+    // Errors here are clients going away or breaking the protocol; nothing to act on.
+    drop(
+        http1::Builder::new()
+            .timer(TokioTimer::new())
+            .header_read_timeout(HEADER_TIMEOUT)
+            .max_buf_size(MAX_HEAD)
+            .serve_connection(io, service)
+            .await,
+    );
 }
 
 async fn handle(

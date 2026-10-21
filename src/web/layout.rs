@@ -56,16 +56,18 @@ pub(crate) enum Section {
     Users,
     Groups,
     Sessions,
+    Providers,
     Log,
     Settings,
 }
 
 impl Section {
-    const ALL: [Self; 6] = [
+    const ALL: [Self; 7] = [
         Self::Apps,
         Self::Users,
         Self::Groups,
         Self::Sessions,
+        Self::Providers,
         Self::Log,
         Self::Settings,
     ];
@@ -76,6 +78,7 @@ impl Section {
             Self::Users => "/admin/users",
             Self::Groups => "/admin/groups",
             Self::Sessions => "/admin/sessions",
+            Self::Providers => "/admin/providers",
             Self::Log => "/admin/log",
             Self::Settings => "/admin/settings",
         }
@@ -87,6 +90,7 @@ impl Section {
             Self::Users => "user",
             Self::Groups => "users",
             Self::Sessions => "monitor-smartphone",
+            Self::Providers => "globe",
             Self::Log => "scroll-text",
             Self::Settings => "sliders-horizontal",
         }
@@ -99,6 +103,7 @@ impl Section {
             Self::Users => text.section_users,
             Self::Groups => text.section_groups,
             Self::Sessions => text.section_sessions,
+            Self::Providers => text.section_providers,
             Self::Log => text.section_log,
             Self::Settings => text.section_settings,
         }

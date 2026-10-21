@@ -96,6 +96,7 @@ fn serve() -> ExitCode {
 async fn run(config: Config) -> Result<(), String> {
     let db = Db::open(&config.database).map_err(|e| e.to_string())?;
     let listener = http::bind(config.listen).await.map_err(|e| e.to_string())?;
+    let tls = config.tls.clone().map(http::tls::acceptor).transpose()?;
     let app = Arc::new(App::new(config, db).await.map_err(|e| e.to_string())?);
     if let Some(link) = web::setup::prepare(&app).await.map_err(|e| e.to_string())? {
         warning!("there are no accounts yet; create the first administrator at {link}");
@@ -106,7 +107,7 @@ async fn run(config: Config) -> Result<(), String> {
         app.config.listen,
         app.config.issuer.as_str()
     );
-    http::serve(app, listener).await;
+    http::serve(app, listener, tls).await;
     Ok(())
 }
 

@@ -1,6 +1,7 @@
-//! Signing in: the password step, the code step and recovery codes.
+//! Signing in: the first factor (a password or an outside provider), the code step and
+//! recovery codes.
 //!
-//! The steps are types. [`PasswordChecked`] exists only after a password matched, and
+//! The steps are types. [`FirstFactor`] exists only after a password or provider succeeded, and
 //! [`SignedIn`] only after every factor the account has; both have private fields and are made
 //! only in this module. A session can only be started from a `SignedIn`, so no handler can start
 //! one early by mistake.
@@ -17,6 +18,7 @@ use super::{App, Failure, is_local_path, session};
 use crate::crypto::password::{self, PasswordHash};
 use crate::crypto::{sha256, totp};
 use crate::encoding::{base64url, decode_base64url};
+use crate::form::encode;
 use crate::html::{Html, html};
 use crate::http::cookie::{self, SameSite, SetCookie};
 use crate::http::{Request, Response};
@@ -32,10 +34,12 @@ const PENDING_LIFETIME: i64 = 5 * 60;
 /// How long a sign-in waits for a free password hashing slot before giving up.
 const HASHING_WAIT: Duration = Duration::from_secs(10);
 
-/// Someone whose password matched and whose account also has a second factor.
-pub(crate) struct PasswordChecked {
+/// Someone who passed the first factor and whose account also has a second one.
+pub(crate) struct FirstFactor {
     user: UserId,
     issued_at: i64,
+    /// Signed in with an outside provider rather than a password.
+    federated: bool,
 }
 
 /// Someone who passed every factor their account has.
@@ -50,7 +54,8 @@ impl SignedIn {
         self.user
     }
 
-    /// The `amr` values of this sign-in: `pwd`, or `pwd otp`.
+    /// The `amr` values of this sign-in (RFC 8176): `pwd` or `fed`, then `otp` if a code was
+    /// entered.
     pub(crate) fn amr(&self) -> &'static str {
         self.amr
     }
@@ -125,10 +130,10 @@ pub(super) async fn page(app: &App, request: &Request) -> Result<Response, Failu
         .ok()
         .flatten()
         .unwrap_or_default();
-    login_page(app, request, hint, &next, None)
+    login_page(app, request, hint, &next, None).await
 }
 
-fn login_page(
+async fn login_page(
     app: &App,
     request: &Request,
     username: &str,
@@ -166,6 +171,32 @@ fn login_page(
         { text.sign_in },
         "</button></form>"
     );
+    let providers = super::providers::enabled(app).await?;
+    if !providers.is_empty() {
+        html!(content, "<div class=\"alternatives\">");
+        for provider in &providers {
+            let google = provider.issuer.as_deref() == Some("https://accounts.google.com");
+            html!(
+                content,
+                "<a class=\"button block\" href=\"/login/",
+                { provider.slug },
+                "?next=",
+                { encode(next) },
+                "\">"
+            );
+            if google {
+                html!(content, { icon("google") });
+            }
+            html!(
+                content,
+                { text.sign_in_with },
+                " ",
+                { provider.name },
+                "</a>"
+            );
+        }
+        html!(content, "</div>");
+    }
     let page = auth_page(app, request, lang, text.sign_in_title, &content);
     Ok(csrf.apply(app, Response::html(page)))
 }
@@ -183,7 +214,7 @@ pub(super) async fn submit(app: &App, request: &Request) -> Result<Response, Fai
         .trim()
         .to_ascii_lowercase();
     if !csrf::verify(app, request) {
-        return login_page(app, request, &username, &next, Some(text.form_expired));
+        return login_page(app, request, &username, &next, Some(text.form_expired)).await;
     }
     let password = request
         .form
@@ -195,7 +226,7 @@ pub(super) async fn submit(app: &App, request: &Request) -> Result<Response, Fai
     let limits = &app.limits;
     if !limits.password_by_address.allows(&address) || !limits.password_by_account.allows(&username)
     {
-        return login_page(app, request, &username, &next, Some(text.too_many_attempts));
+        return login_page(app, request, &username, &next, Some(text.too_many_attempts)).await;
     }
 
     let lookup = username.clone();
@@ -212,7 +243,7 @@ pub(super) async fn submit(app: &App, request: &Request) -> Result<Response, Fai
         limits.password_by_address.fail(&address);
         limits.password_by_account.fail(&username);
         info!("wrong password for {username:?} from {address}");
-        return login_page(app, request, &username, &next, Some(text.wrong_credentials));
+        return login_page(app, request, &username, &next, Some(text.wrong_credentials)).await;
     };
     limits.password_by_account.reset(&username);
 
@@ -236,30 +267,59 @@ pub(super) async fn submit(app: &App, request: &Request) -> Result<Response, Fai
         };
         return finish(app, request, signed_in, &next).await;
     }
-    let checked = PasswordChecked {
+    let checked = FirstFactor {
         user: user.id,
         issued_at: time::now(),
+        federated: false,
     };
     set_pending(app, &checked, &next, Response::redirect("/login/code"))
+}
+
+/// Continues a sign-in after an outside provider vouched for `user`: with the code step if the
+/// account has two-factor sign-in, which a provider doesn't replace, or else straight in.
+pub(super) async fn after_provider(
+    app: &App,
+    request: &Request,
+    user: User,
+    next: &str,
+) -> Result<Response, Failure> {
+    if user.totp_secret.is_none() {
+        let signed_in = SignedIn {
+            user: user.id,
+            username: user.username,
+            amr: "fed",
+        };
+        return finish(app, request, signed_in, next).await;
+    }
+    let checked = FirstFactor {
+        user: user.id,
+        issued_at: time::now(),
+        federated: true,
+    };
+    set_pending(app, &checked, next, Response::redirect("/login/code"))
 }
 
 #[derive(Serialize, Deserialize)]
 struct Pending {
     user: i64,
     issued_at: i64,
+    federated: bool,
     next: String,
 }
 
-/// Carries the password step to the code step in a sealed cookie that lasts five minutes.
+/// Carries the first step to the code step in a sealed cookie that lasts five minutes. It is
+/// `Lax`, because after a provider the browser arrives here by a redirect that began on another
+/// site.
 fn set_pending(
     app: &App,
-    checked: &PasswordChecked,
+    checked: &FirstFactor,
     next: &str,
     response: Response,
 ) -> Result<Response, Failure> {
     let pending = Pending {
         user: checked.user.0,
         issued_at: checked.issued_at,
+        federated: checked.federated,
         next: next.to_owned(),
     };
     let json =
@@ -270,21 +330,22 @@ fn set_pending(
         name: &cookie::name(PENDING_COOKIE, secure),
         value: &sealed,
         max_age: Some(PENDING_LIFETIME),
-        same_site: SameSite::Strict,
+        same_site: SameSite::Lax,
     };
     Ok(response.cookie(&cookie, secure))
 }
 
-fn pending(app: &App, request: &Request) -> Option<(PasswordChecked, String)> {
+fn pending(app: &App, request: &Request) -> Option<(FirstFactor, String)> {
     let name = cookie::name(PENDING_COOKIE, app.config.issuer.is_secure());
     let sealed = decode_base64url(request.cookie(&name)?)?;
     let json = app.keys.signin.open(&sealed, PENDING_COOKIE.as_bytes())?;
     let pending: Pending = serde_json::from_slice(json.expose()).ok()?;
     let age = time::now().saturating_sub(pending.issued_at);
     ((0..PENDING_LIFETIME).contains(&age) && is_local_path(&pending.next)).then(|| {
-        let checked = PasswordChecked {
+        let checked = FirstFactor {
             user: UserId(pending.user),
             issued_at: pending.issued_at,
+            federated: pending.federated,
         };
         (checked, pending.next)
     })
@@ -296,7 +357,7 @@ fn clear_pending(app: &App, response: Response) -> Response {
         name: &cookie::name(PENDING_COOKIE, secure),
         value: "",
         max_age: Some(0),
-        same_site: SameSite::Strict,
+        same_site: SameSite::Lax,
     };
     response.cookie(&cookie, secure)
 }
@@ -464,7 +525,11 @@ pub(super) async fn second_step_submit(
     let signed_in = SignedIn {
         user: user.id,
         username: user.username,
-        amr: "pwd otp",
+        amr: if checked.federated {
+            "fed otp"
+        } else {
+            "pwd otp"
+        },
     };
     finish(app, request, signed_in, &next).await
 }

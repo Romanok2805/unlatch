@@ -11,7 +11,8 @@ use crate::encoding::{base32, base64url, decode_base64url};
 use crate::html::{Html, html};
 use crate::http::{Request, Response};
 use crate::store::sessions::{self, ActiveSession, SessionId, SessionSummary};
-use crate::store::{audit, users};
+use crate::store::users::UserId;
+use crate::store::{audit, providers, users};
 use crate::time::{self, format_utc};
 
 const MIN_PASSWORD_CHARS: usize = 12;
@@ -127,7 +128,9 @@ pub(super) async fn overview(app: &App, request: &Request) -> Result<Response, F
         .db
         .run(move |conn| sessions::list(conn, Some(user_id), now))
         .await?;
-    html!(content, "</ul><h2>", { text.section_sessions }, "</h2>");
+    html!(content, "</ul>");
+    provider_list(app, &mut content, text, &csrf, user.id).await?;
+    html!(content, "<h2>", { text.section_sessions }, "</h2>");
     session_list(&mut content, text, &csrf, &others, session.id);
     html!(
         content,
@@ -140,6 +143,52 @@ pub(super) async fn overview(app: &App, request: &Request) -> Result<Response, F
     );
     let page = auth_page(app, request, lang, text.account_title, &content);
     Ok(csrf.apply(app, Response::html(page)))
+}
+
+/// The enabled sign-in providers, each with a button to link or unlink it.
+async fn provider_list(
+    app: &App,
+    out: &mut Html,
+    text: &Text,
+    csrf: &Csrf,
+    user: UserId,
+) -> Result<(), Failure> {
+    let enabled = super::providers::enabled(app).await?;
+    if enabled.is_empty() {
+        return Ok(());
+    }
+    let linked = app
+        .db
+        .run(move |conn| providers::linked_providers(conn, user))
+        .await?;
+    html!(
+        *out,
+        "<h2>",
+        { text.section_providers },
+        "</h2><ul class=\"rows\">"
+    );
+    for provider in &enabled {
+        let is_linked = linked.contains(&provider.id);
+        let google = provider.issuer.as_deref() == Some("https://accounts.google.com");
+        html!(
+            *out,
+            "<li>",
+            { icon(if google { "google" } else { "globe" }) },
+            "<span>",
+            { provider.name },
+            "</span><form method=\"post\" action=\"/account/providers\">",
+            { csrf.field() },
+            "<input type=\"hidden\" name=\"provider\" value=\"",
+            { provider.slug },
+            "\"><button class=\"compact\" name=\"action\" value=\"",
+            { if is_linked { "unlink" } else { "link" } },
+            "\">",
+            { if is_linked { text.unlink } else { text.link } },
+            "</button></form></li>"
+        );
+    }
+    html!(*out, "</ul>");
+    Ok(())
 }
 
 /// The user's sessions, each with a button that ends it, except the current one.
@@ -377,7 +426,7 @@ fn enrol_page(
     Ok(csrf.apply(app, Response::html(page)))
 }
 
-fn enrolment_context(user: users::UserId) -> Vec<u8> {
+fn enrolment_context(user: UserId) -> Vec<u8> {
     format!("enrol {}", user.0).into_bytes()
 }
 
