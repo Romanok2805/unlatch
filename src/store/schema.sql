@@ -136,6 +136,14 @@ CREATE TABLE grants (
 
 CREATE INDEX grants_session ON grants (session_id);
 
+-- Applications that received tokens in a session. They are told when it ends, even if their
+-- grant was revoked earlier.
+CREATE TABLE session_apps (
+    session_id INTEGER NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+    app_id INTEGER NOT NULL REFERENCES apps (id) ON DELETE CASCADE,
+    PRIMARY KEY (session_id, app_id)
+) STRICT;
+
 -- Per-host sessions of forward authentication.
 CREATE TABLE proxy_sessions (
     token_hash BLOB PRIMARY KEY,

@@ -26,9 +26,7 @@ pub(super) async fn sessions(
     if request.method == Method::POST {
         if let Ok(id) = field(request, "session").parse() {
             let id = SessionId(id);
-            app.db
-                .run(move |conn| sessions::delete_owned(conn, id, None))
-                .await?;
+            crate::web::session::end(app, crate::web::session::Ending::One(id)).await?;
             admin
                 .record(app, request, "end session", &id.0.to_string())
                 .await?;

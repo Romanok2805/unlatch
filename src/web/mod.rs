@@ -25,6 +25,7 @@ use self::limits::Limits;
 use self::oidc::keys::KeyRing;
 use crate::config::Config;
 use crate::crypto::{CryptoError, MacKey, SealingKey};
+use crate::http::client::Client;
 use crate::http::cookie::{SameSite, SetCookie};
 use crate::http::{Request, Response};
 use crate::log::error;
@@ -41,6 +42,8 @@ pub(crate) struct App {
     hashing: Semaphore,
     branding: RwLock<Branding>,
     signing: RwLock<Arc<KeyRing>>,
+    /// For requests to sign-in providers and back-channel logout.
+    pub(crate) client: Arc<Client>,
 }
 
 const HASHING_SLOTS: usize = 2;
@@ -117,6 +120,7 @@ impl App {
             hashing: Semaphore::new(HASHING_SLOTS),
             branding: RwLock::new(branding),
             signing: RwLock::new(Arc::new(ring)),
+            client: Arc::new(Client::new().map_err(|_| Failure::Crypto(CryptoError))?),
         })
     }
 

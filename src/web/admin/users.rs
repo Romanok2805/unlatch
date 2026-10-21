@@ -12,6 +12,7 @@ use crate::store::users::{self, NewUser, User, UserChanges, UserId, Username};
 use crate::time;
 use crate::web::i18n::Text;
 use crate::web::layout::{Section, copy_button, error_notice, icon, success_notice};
+use crate::web::session::{self, Ending};
 use crate::web::{App, Failure};
 
 /// Invitation and reset links work for three days.
@@ -344,6 +345,7 @@ pub(super) async fn edit(
                     Some(text.keep_an_admin),
                 ));
             }
+            session::end(app, Ending::AllOf(id, None)).await?;
             app.db.run(move |conn| users::delete(conn, id)).await?;
             admin
                 .record(app, request, "delete user", &user.username)
@@ -361,6 +363,9 @@ pub(super) async fn edit(
                 user.is_admin && !user.disabled && (!changes.is_admin || changes.disabled);
             if loses_admin && last_admin(app).await? {
                 return Ok(view(&draft, Some(text.keep_an_admin)));
+            }
+            if changes.disabled {
+                session::end(app, Ending::AllOf(id, None)).await?;
             }
             app.db
                 .run(move |conn| users::update(conn, id, &changes))
@@ -419,9 +424,7 @@ async fn act(
             )))
         }
         _ => {
-            app.db
-                .run(move |conn| sessions::delete_for_user(conn, id, None))
-                .await?;
+            session::end(app, Ending::AllOf(id, None)).await?;
             admin
                 .record(app, request, "end sessions", &user.username)
                 .await?;

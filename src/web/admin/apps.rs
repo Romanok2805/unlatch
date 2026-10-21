@@ -7,6 +7,7 @@ use super::{
 };
 use crate::crypto::{Algorithm, random_token, sha256};
 use crate::html::{Html, html};
+use crate::http::client::{Plain, is_valid_url};
 use crate::http::{Request, Response};
 use crate::store::apps::{self, AppChanges, AppId, AppRecord, Kind};
 use crate::store::groups::{self, Group, GroupId};
@@ -324,6 +325,7 @@ struct Draft {
     all_users: bool,
     skip_consent: bool,
     id_token_alg: String,
+    backchannel_logout_uri: String,
     host: String,
     redirect_uris: Vec<String>,
     post_logout_uris: Vec<String>,
@@ -341,6 +343,7 @@ impl Draft {
             all_users: record.all_users,
             skip_consent: record.skip_consent,
             id_token_alg: record.id_token_alg.name().to_owned(),
+            backchannel_logout_uri: record.backchannel_logout_uri.clone().unwrap_or_default(),
             host: record.host.clone().unwrap_or_default(),
             redirect_uris: strings(&record.redirect_uris),
             post_logout_uris: strings(&record.post_logout_uris),
@@ -356,6 +359,7 @@ impl Draft {
             all_users: checked(request, "all_users"),
             skip_consent: checked(request, "skip_consent"),
             id_token_alg: field(request, "id_token_alg").to_owned(),
+            backchannel_logout_uri: field(request, "backchannel_logout_uri").to_owned(),
             host: field(request, "host").to_owned(),
             redirect_uris: lines(request, "redirect_uris"),
             post_logout_uris: lines(request, "post_logout_uris"),
@@ -387,12 +391,18 @@ impl Draft {
                 })
                 .collect()
         };
+        let backchannel_logout_uri = match self.backchannel_logout_uri.as_str() {
+            "" => None,
+            uri if is_valid_url(uri, Plain::Anywhere) => Some(uri.to_owned()),
+            uri => return Err(format!("{uri}: {}", text.url_invalid)),
+        };
         Ok(AppChanges {
             name: self.name.clone(),
             enabled: self.enabled,
             all_users: self.all_users,
             skip_consent: self.skip_consent,
             id_token_alg: Algorithm::from_name(&self.id_token_alg).unwrap_or(Algorithm::Rs256),
+            backchannel_logout_uri,
             host,
             redirect_uris: checked_uris(&self.redirect_uris)?,
             post_logout_uris: checked_uris(&self.post_logout_uris)?,
@@ -585,47 +595,7 @@ fn settings_sections(
             );
             text_input(out, text.host, "host", &draft.host, Some(text.host_note));
         }
-        Kind::Oidc => {
-            html!(
-                *out,
-                "<section class=\"section\"><h2>OpenID Connect</h2><div class=\"stack\">"
-            );
-            lines_input(
-                out,
-                text.redirect_uris,
-                "redirect_uris",
-                &draft.redirect_uris,
-                text.one_per_line,
-            );
-            lines_input(
-                out,
-                text.post_logout_uris,
-                "post_logout_uris",
-                &draft.post_logout_uris,
-                text.one_per_line,
-            );
-            lines_input(
-                out,
-                text.resources,
-                "resources",
-                &draft.resources,
-                text.resources_note,
-            );
-            html!(
-                *out,
-                "<div><label for=\"id_token_alg\">",
-                { text.id_token_alg },
-                "</label><select id=\"id_token_alg\" name=\"id_token_alg\">"
-            );
-            for algorithm in Algorithm::ALL {
-                html!(*out, "<option");
-                if algorithm.name() == draft.id_token_alg {
-                    html!(*out, " selected");
-                }
-                html!(*out, ">", { algorithm.name() }, "</option>");
-            }
-            html!(*out, "</select></div>");
-        }
+        Kind::Oidc => oidc_fields(out, admin, draft),
     }
     html!(
         *out,
@@ -661,6 +631,57 @@ fn settings_sections(
         );
         html!(*out, "</div></section>");
     }
+}
+
+/// The OpenID Connect part of the application form.
+fn oidc_fields(out: &mut Html, admin: &Admin, draft: &Draft) {
+    let text = admin.lang.text();
+    html!(
+        *out,
+        "<section class=\"section\"><h2>OpenID Connect</h2><div class=\"stack\">"
+    );
+    lines_input(
+        out,
+        text.redirect_uris,
+        "redirect_uris",
+        &draft.redirect_uris,
+        text.one_per_line,
+    );
+    lines_input(
+        out,
+        text.post_logout_uris,
+        "post_logout_uris",
+        &draft.post_logout_uris,
+        text.one_per_line,
+    );
+    lines_input(
+        out,
+        text.resources,
+        "resources",
+        &draft.resources,
+        text.resources_note,
+    );
+    html!(
+        *out,
+        "<div><label for=\"id_token_alg\">",
+        { text.id_token_alg },
+        "</label><select id=\"id_token_alg\" name=\"id_token_alg\">"
+    );
+    for algorithm in Algorithm::ALL {
+        html!(*out, "<option");
+        if algorithm.name() == draft.id_token_alg {
+            html!(*out, " selected");
+        }
+        html!(*out, ">", { algorithm.name() }, "</option>");
+    }
+    html!(*out, "</select></div>");
+    text_input(
+        out,
+        text.backchannel_logout_uri,
+        "backchannel_logout_uri",
+        &draft.backchannel_logout_uri,
+        Some(text.backchannel_logout_note),
+    );
 }
 
 /// What the administrator copies into the application, and a button for a new secret.

@@ -13,7 +13,6 @@ use crate::form::Form;
 use crate::html::{Html, html};
 use crate::http::{Request, Response};
 use crate::store::apps;
-use crate::store::sessions;
 
 #[derive(Deserialize)]
 struct Hint {
@@ -76,8 +75,7 @@ pub(crate) async fn end_session(app: &App, request: &Request) -> Result<Response
         if !hinted && !confirmed {
             return confirm_page(app, request, params, &current.user.username);
         }
-        let id = current.id;
-        app.db.run(move |conn| sessions::delete(conn, id)).await?;
+        session::end(app, session::Ending::One(current.id)).await?;
     }
     let response = match return_to {
         Some(uri) => {

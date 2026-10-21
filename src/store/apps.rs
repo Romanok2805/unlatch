@@ -224,6 +224,7 @@ pub(crate) struct AppChanges {
     pub(crate) all_users: bool,
     pub(crate) skip_consent: bool,
     pub(crate) id_token_alg: Algorithm,
+    pub(crate) backchannel_logout_uri: Option<String>,
     pub(crate) host: Option<String>,
     pub(crate) redirect_uris: Vec<String>,
     pub(crate) post_logout_uris: Vec<String>,
@@ -239,7 +240,8 @@ pub(crate) fn update(
     let tx = conn.transaction()?;
     tx.execute(
         "UPDATE apps SET name = ?2, enabled = ?3, all_users = ?4, skip_consent = ?5,
-                         id_token_alg = ?6, host = CASE WHEN kind = 'proxy' THEN ?7 ELSE NULL END
+                         id_token_alg = ?6, host = CASE WHEN kind = 'proxy' THEN ?7 ELSE NULL END,
+                         backchannel_logout_uri = ?8
          WHERE id = ?1",
         params![
             id.0,
@@ -248,7 +250,8 @@ pub(crate) fn update(
             changes.all_users,
             changes.skip_consent,
             changes.id_token_alg.name(),
-            changes.host
+            changes.host,
+            changes.backchannel_logout_uri
         ],
     )?;
     tx.execute("DELETE FROM app_uris WHERE app_id = ?1", [id.0])?;

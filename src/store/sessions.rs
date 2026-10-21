@@ -194,3 +194,53 @@ pub(crate) fn delete_owned(
     )?;
     Ok(())
 }
+
+/// The sessions of a user, except one.
+pub(crate) fn ids_of_user(
+    conn: &Connection,
+    user: UserId,
+    except: Option<SessionId>,
+) -> Result<Vec<SessionId>, DbError> {
+    let mut statement =
+        conn.prepare("SELECT id FROM sessions WHERE user_id = ?1 AND id IS NOT ?2")?;
+    let ids = statement
+        .query_map(params![user.0, except.map(|id| id.0)], |row| {
+            row.get(0).map(SessionId)
+        })?
+        .collect::<Result<_, _>>()?;
+    Ok(ids)
+}
+
+/// An application to tell that a session ended (OpenID Connect Back-Channel Logout).
+pub(crate) struct LogoutTarget {
+    pub(crate) client_id: String,
+    pub(crate) uri: String,
+    pub(crate) user: UserId,
+    pub(crate) sid: String,
+}
+
+/// The applications that received tokens in a session and asked to hear about its end.
+pub(crate) fn logout_targets(
+    conn: &Connection,
+    id: SessionId,
+) -> Result<Vec<LogoutTarget>, DbError> {
+    let mut statement = conn.prepare(
+        "SELECT DISTINCT apps.client_id, apps.backchannel_logout_uri, sessions.user_id, sessions.public_id
+         FROM session_apps
+         JOIN apps ON apps.id = session_apps.app_id
+         JOIN sessions ON sessions.id = session_apps.session_id
+         WHERE session_apps.session_id = ?1 AND apps.enabled
+               AND apps.backchannel_logout_uri IS NOT NULL",
+    )?;
+    let targets = statement
+        .query_map([id.0], |row| {
+            Ok(LogoutTarget {
+                client_id: row.get(0)?,
+                uri: row.get(1)?,
+                user: UserId(row.get(2)?),
+                sid: row.get(3)?,
+            })
+        })?
+        .collect::<Result<_, _>>()?;
+    Ok(targets)
+}

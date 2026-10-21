@@ -101,6 +101,7 @@ pub(crate) struct Grant {
     pub(crate) generation: i64,
 }
 
+/// Creates a grant, and remembers that the application took part in the session.
 pub(crate) fn create(
     conn: &Connection,
     session: SessionId,
@@ -108,6 +109,10 @@ pub(crate) fn create(
     scope: &str,
     resource: Option<&str>,
 ) -> Result<GrantId, DbError> {
+    conn.execute(
+        "INSERT OR IGNORE INTO session_apps (session_id, app_id) VALUES (?1, ?2)",
+        params![session.0, app.0],
+    )?;
     conn.execute(
         "INSERT INTO grants (session_id, app_id, scope, resource, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5)",

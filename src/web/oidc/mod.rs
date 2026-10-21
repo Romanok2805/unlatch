@@ -1,6 +1,7 @@
 //! OpenID Connect and the OAuth 2.0 endpoints it builds on.
 
 mod authorize;
+pub(crate) mod backchannel;
 mod discovery;
 pub(crate) mod keys;
 mod logout;

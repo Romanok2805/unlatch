@@ -250,7 +250,7 @@ pub(super) async fn link_submit(app: &App, request: &Request) -> Result<Response
         return link_form(app, request, Some(problem));
     }
     let password_hash = hash_password(app, field("new")).await?;
-    let ip = request.client_ip.to_string();
+    let (ip, user_id) = (request.client_ip.to_string(), user.id);
     let set = app
         .db
         .run(move |conn| {
@@ -259,7 +259,6 @@ pub(super) async fn link_submit(app: &App, request: &Request) -> Result<Response
             }
             users::set_password(conn, user.id, &password_hash)?;
             users::delete_password_links(conn, user.id)?;
-            sessions::delete_for_user(conn, user.id, None)?;
             audit::record(
                 conn,
                 &audit::Entry {
@@ -275,6 +274,7 @@ pub(super) async fn link_submit(app: &App, request: &Request) -> Result<Response
     if !set {
         return link_form(app, request, Some(text.link_expired));
     }
+    session::end(app, session::Ending::AllOf(user_id, None)).await?;
     let mut content = Html::new();
     html!(
         content,

@@ -1,5 +1,6 @@
 //! Browser sessions: the cookie, finding the session it belongs to, starting and ending one.
 
+use super::oidc::backchannel;
 use super::signin::SignedIn;
 use super::{App, Failure, csrf};
 use crate::crypto::{TokenHash, random_bytes, random_token};
@@ -7,7 +8,8 @@ use crate::encoding::base64url;
 use crate::form::encode;
 use crate::http::cookie::{self, SameSite, SetCookie};
 use crate::http::{Request, Response};
-use crate::store::sessions::{self, ActiveSession, NewSession};
+use crate::store::sessions::{self, ActiveSession, NewSession, SessionId};
+use crate::store::users::UserId;
 use crate::time;
 
 const COOKIE: &str = "session";
@@ -125,8 +127,42 @@ pub(crate) async fn sign_out(app: &App, request: &Request) -> Result<Response, F
         return Ok(Response::redirect("/account"));
     }
     if let Some(session) = current(app, request).await? {
-        let id = session.id;
-        app.db.run(move |conn| sessions::delete(conn, id)).await?;
+        end(app, Ending::One(session.id)).await?;
     }
     Ok(clear(app, Response::redirect("/login")))
+}
+
+/// Which sessions to end.
+pub(crate) enum Ending {
+    One(SessionId),
+    /// A session, if it belongs to this user.
+    Owned(SessionId, UserId),
+    /// Every session of a user, except one.
+    AllOf(UserId, Option<SessionId>),
+}
+
+/// Ends sessions, with their codes and grants, and tells the applications that asked to know.
+/// Every way of ending a session goes through here, so none forgets the notice.
+pub(crate) async fn end(app: &App, ending: Ending) -> Result<(), Failure> {
+    let targets = app
+        .db
+        .run(move |conn| {
+            let ids = match ending {
+                Ending::One(id) => vec![id],
+                Ending::Owned(id, user) => sessions::ids_of_user(conn, user, None)?
+                    .into_iter()
+                    .filter(|owned| *owned == id)
+                    .collect(),
+                Ending::AllOf(user, except) => sessions::ids_of_user(conn, user, except)?,
+            };
+            let mut targets = Vec::new();
+            for id in ids {
+                targets.extend(sessions::logout_targets(conn, id)?);
+                sessions::delete(conn, id)?;
+            }
+            Ok(targets)
+        })
+        .await?;
+    backchannel::notify(app, targets);
+    Ok(())
 }

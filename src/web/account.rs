@@ -200,10 +200,7 @@ pub(super) async fn end_session(app: &App, request: &Request) -> Result<Response
         .flatten()
         .and_then(|id| id.parse().ok());
     if let (true, Some(id)) = (csrf::verify(app, request), id) {
-        let (id, owner) = (SessionId(id), session.user.id);
-        app.db
-            .run(move |conn| sessions::delete_owned(conn, id, Some(owner)))
-            .await?;
+        session::end(app, session::Ending::Owned(SessionId(id), session.user.id)).await?;
     }
     Ok(Response::redirect("/account"))
 }
@@ -289,16 +286,14 @@ pub(super) async fn password_submit(app: &App, request: &Request) -> Result<Resp
         return password_form(app, request, Some(problem), false);
     }
     let hash = hash_password(app, field("new")).await?;
-    let (id, session_id, username, ip) = (
+    let (id, username, ip) = (
         user.id,
-        session.id,
         user.username.clone(),
         request.client_ip.to_string(),
     );
     app.db
         .run(move |conn| {
             users::set_password(conn, id, &hash)?;
-            sessions::delete_for_user(conn, id, Some(session_id))?;
             audit::record(
                 conn,
                 &audit::Entry {
@@ -310,6 +305,7 @@ pub(super) async fn password_submit(app: &App, request: &Request) -> Result<Resp
             )
         })
         .await?;
+    session::end(app, session::Ending::AllOf(user.id, Some(session.id))).await?;
     password_form(app, request, Some(text.password_changed), true)
 }
 

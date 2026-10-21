@@ -217,6 +217,9 @@ pub(crate) struct Text {
     pub(crate) uri_user_info: &'static str,
     pub(crate) uri_port: &'static str,
     pub(crate) uri_host: &'static str,
+    pub(crate) backchannel_logout_uri: &'static str,
+    pub(crate) backchannel_logout_note: &'static str,
+    pub(crate) url_invalid: &'static str,
 }
 
 static EN: Text = Text {
@@ -374,6 +377,9 @@ static EN: Text = Text {
     uri_user_info: "The host can't contain @ or %",
     uri_port: "The port must be a number",
     uri_host: "The host must be lowercase letters, digits, dots and dashes",
+    backchannel_logout_uri: "Back-channel logout URI",
+    backchannel_logout_note: "Unlatch tells the application here when a session ends. Optional.",
+    url_invalid: "Enter an http or https address",
 };
 
 static RU: Text = Text {
@@ -531,4 +537,7 @@ static RU: Text = Text {
     uri_user_info: "В хосте не может быть @ и %",
     uri_port: "Порт должен быть числом",
     uri_host: "Хост: строчные латинские буквы, цифры, точки и дефисы",
+    backchannel_logout_uri: "Адрес back-channel logout",
+    backchannel_logout_note: "Сюда Unlatch сообщит приложению о конце сеанса. Необязательно.",
+    url_invalid: "Введите адрес http или https",
 };

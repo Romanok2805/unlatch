@@ -1,5 +1,6 @@
 //! HTTP: the server, requests as the rest of Unlatch sees them, and responses.
 
+pub(crate) mod client;
 pub(crate) mod cookie;
 mod server;
 
