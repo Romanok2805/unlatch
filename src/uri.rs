@@ -142,7 +142,8 @@ fn authority(rest: &str) -> Result<Authority<'_>, InvalidRedirectUri> {
         .split_at_checked(port_start)
         .unwrap_or((host_and_port, ""));
     if let Some(port) = port.strip_prefix(':') {
-        if port.parse::<u16>().is_err() {
+        // Digits only: parse() would also take a sign, as in "+80", which browsers refuse.
+        if !port.bytes().all(|b| b.is_ascii_digit()) || port.parse::<u16>().is_err() {
             return Err(InvalidRedirectUri::Port);
         }
     } else if !port.is_empty() {
@@ -181,6 +182,7 @@ mod tests {
             "https://app.example.com/cb#x",
             "https://user@app.example.com/cb",
             "https://app.example.com:abc/cb",
+            "http://[::1]:+10/cb",
             "https:///cb",
             "https://App.example.com/cb",
             "https://app.example.com/a b",

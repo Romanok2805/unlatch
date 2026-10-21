@@ -1,6 +1,6 @@
 [package]
 name = "unlatch"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.99"
 description = "A small, self-hosted OpenID Connect provider for single sign-on"
@@ -29,6 +29,8 @@ rust_2018_idioms = { level = "warn", priority = -1 }
 let_underscore_drop = "warn"
 unreachable_pub = "warn"
 unused_qualifications = "warn"
+# Set by cargo-fuzz; see fuzz/.
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(fuzzing)"] }
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }

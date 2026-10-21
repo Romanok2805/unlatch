@@ -1,5 +1,9 @@
 # Running Unlatch
 
+Each release on GitHub has static Linux binaries for x86-64 and ARM64 and a container image in
+the GitHub container registry. The release lists their SHA-256 sums, and `gh attestation verify`
+confirms that a file or image was built from this repository by its release workflow.
+
 ## With systemd
 
 The unit below runs Unlatch as a temporary user with no access to the rest of the system. The
@@ -45,6 +49,26 @@ WantedBy=multi-user.target
 
 Create the key once with `unlatch generate-key > /etc/unlatch/key` and make it readable by root
 only; systemd hands it to the service.
+
+## In a container
+
+The image holds nothing but the binary and runs as user 65532. It listens on port 8080 and keeps
+its database in the volume `/data`. Give it the key as a read-only file that user can read:
+
+```sh
+unlatch generate-key > /etc/unlatch/key
+chown 65532 /etc/unlatch/key && chmod 400 /etc/unlatch/key
+docker run -d --name unlatch -p 127.0.0.1:8080:8080 \
+  -e UNLATCH_ISSUER=https://login.example.com \
+  -e UNLATCH_TRUSTED_PROXIES=172.16.0.0/12 \
+  -e UNLATCH_KEY_FILE=/run/secrets/unlatch-key \
+  -v /etc/unlatch/key:/run/secrets/unlatch-key:ro \
+  -v unlatch:/data \
+  ghcr.io/<owner>/unlatch
+```
+
+`UNLATCH_TRUSTED_PROXIES` names the network the reverse proxy connects from; the example covers
+Docker's default networks.
 
 ## Behind a reverse proxy
 

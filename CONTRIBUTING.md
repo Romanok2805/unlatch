@@ -15,6 +15,22 @@ cargo deny check
 
 The lints in `Cargo.toml` are strict on purpose; the comments there explain them.
 
+## Fuzzing
+
+The code that reads untrusted input has fuzz targets in `fuzz/`, which CI runs for a minute each.
+To run one for longer, with [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz):
+
+```sh
+cd fuzz
+cargo +nightly fuzz run jws
+```
+
+`cargo fuzz list` names the targets. On Windows, the folder of Visual Studio's
+`clang_rt.asan_dynamic-x86_64.dll` must be on `PATH`. An input that breaks a target is saved in
+`fuzz/artifacts/`; add it as a test of the code it broke.
+
+[conformance/](conformance/README.md) describes testing against the OpenID Foundation's suite.
+
 ## Adding a dependency
 
 Say in the pull request what the crate does for us, why writing it ourselves would be worse, who

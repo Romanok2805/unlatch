@@ -1,0 +1,6 @@
+# Only what the build needs.
+*
+!Cargo.toml
+!Cargo.lock
+!assets/
+!src/

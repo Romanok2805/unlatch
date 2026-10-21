@@ -250,10 +250,8 @@ impl VerifyingKey {
                 if n.len() < MIN_RSA_MODULUS_LEN || n.first() == Some(&0) {
                     return None;
                 }
-                Material::Rsa {
-                    n,
-                    e: decode(&jwk.e)?,
-                }
+                let e = decode(&jwk.e)?;
+                valid_exponent(&e).then_some(Material::Rsa { n, e })?
             }
             ("EC", Some("P-256")) => {
                 let (x, y) = (decode(&jwk.x)?, decode(&jwk.y)?);
@@ -333,6 +331,19 @@ impl VerifyingKey {
                 .is_ok(),
         }
     }
+}
+
+/// An odd RSA exponent from 65537 to 2³² − 1, written without leading zeros, as NIST SP 800-56B
+/// asks. With a tiny one such as 1, anyone could compute a valid signature, which matters where
+/// the sender picks the key, as in DPoP.
+fn valid_exponent(e: &[u8]) -> bool {
+    let mut bytes = [0; 4];
+    let copied = 4_usize
+        .checked_sub(e.len())
+        .and_then(|start| bytes.get_mut(start..))
+        .map(|tail| tail.copy_from_slice(e));
+    let exponent = u32::from_be_bytes(bytes);
+    copied.is_some() && e.first() != Some(&0) && exponent >= 65_537 && !exponent.is_multiple_of(2)
 }
 
 /// A JSON Web Key (RFC 7517) with the members we read or publish. Others are ignored.
@@ -553,6 +564,14 @@ mod tests {
             verify_self_signed(&token(other), "dpop+jwt"),
             Err(JwtError::BadSignature)
         );
+    }
+
+    #[test]
+    fn rsa_keys_need_a_proper_exponent() {
+        assert!(valid_exponent(&[1, 0, 1]));
+        for weak in [&[1][..], &[3], &[0, 1, 0, 1], &[1, 0, 0], &[1, 0, 0, 0, 1]] {
+            assert!(!valid_exponent(weak), "{weak:?}");
+        }
     }
 
     #[test]

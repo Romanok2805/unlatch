@@ -1,0 +1,60 @@
+[package]
+name = "unlatch-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+# A workspace of its own, with its own lock file and target directory.
+[workspace]
+members = ["."]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+unlatch = { path = ".." }
+# An independent parser, as browsers parse URLs, to check our own against.
+url = "2"
+
+[[bin]]
+name = "form"
+path = "fuzz_targets/form.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "jws"
+path = "fuzz_targets/jws.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "base64"
+path = "fuzz_targets/base64.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "html"
+path = "fuzz_targets/html.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "redirect_uri"
+path = "fuzz_targets/redirect_uri.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "local_path"
+path = "fuzz_targets/local_path.rs"
+test = false
+doc = false
+bench = false
