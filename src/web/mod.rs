@@ -5,13 +5,14 @@ mod csrf;
 mod i18n;
 mod layout;
 mod limits;
+mod oidc;
 mod qr;
 mod session;
 pub(crate) mod setup;
 mod signin;
 mod static_files;
 
-use std::sync::{PoisonError, RwLock};
+use std::sync::{Arc, PoisonError, RwLock};
 
 use hyper::{Method, StatusCode, header};
 use tokio::sync::Semaphore;
@@ -19,6 +20,7 @@ use tokio::sync::Semaphore;
 use self::i18n::Lang;
 use self::layout::error_page;
 use self::limits::Limits;
+use self::oidc::keys::KeyRing;
 use crate::config::Config;
 use crate::crypto::{CryptoError, MacKey, SealingKey};
 use crate::http::cookie::{SameSite, SetCookie};
@@ -36,6 +38,7 @@ pub(crate) struct App {
     /// bounds the memory a burst of sign-ins can use.
     hashing: Semaphore,
     branding: RwLock<Branding>,
+    signing: RwLock<Arc<KeyRing>>,
 }
 
 const HASHING_SLOTS: usize = 2;
@@ -49,6 +52,14 @@ pub(crate) struct Keys {
     pub(crate) secrets: SealingKey,
     /// Seals values a form carries to its next request, such as a TOTP seed being set up.
     pub(crate) forms: SealingKey,
+    /// Seals authorization requests while the user signs in.
+    pub(crate) requests: SealingKey,
+    /// Seals refresh tokens.
+    pub(crate) refresh: SealingKey,
+    /// Seals the private keys that sign tokens.
+    pub(crate) signing: SealingKey,
+    /// Derives the `sub` of users.
+    pub(crate) subject: MacKey,
 }
 
 impl Keys {
@@ -59,6 +70,10 @@ impl Keys {
             signin: master.sealing_key("sign-in")?,
             secrets: master.sealing_key("secrets")?,
             forms: master.sealing_key("forms")?,
+            requests: master.sealing_key("authorization requests")?,
+            refresh: master.sealing_key("refresh tokens")?,
+            signing: master.sealing_key("signing keys")?,
+            subject: master.mac_key("subject")?,
         })
     }
 }
@@ -90,14 +105,25 @@ impl App {
                 .filter(|value| is_colour(value))
                 .unwrap_or_else(|| DEFAULT_ACCENT.to_owned()),
         };
+        let keys = Keys::derive(&config)?;
+        let ring = oidc::keys::maintain(&db, &keys.signing).await?;
         Ok(Self {
-            keys: Keys::derive(&config)?,
+            keys,
             config,
             db,
             limits: Limits::new(),
             hashing: Semaphore::new(HASHING_SLOTS),
             branding: RwLock::new(branding),
+            signing: RwLock::new(Arc::new(ring)),
         })
+    }
+
+    pub(crate) fn key_ring(&self) -> Arc<KeyRing> {
+        Arc::clone(&self.signing.read().unwrap_or_else(PoisonError::into_inner))
+    }
+
+    fn set_key_ring(&self, ring: KeyRing) {
+        *self.signing.write().unwrap_or_else(PoisonError::into_inner) = Arc::new(ring);
     }
 
     pub(crate) fn branding(&self) -> Branding {
@@ -199,6 +225,17 @@ async fn dispatch(app: &App, request: &Request) -> Result<Option<Response>, Fail
         "/account/password" if post => account::password_submit(app, request).await?,
         "/account/two-factor" if get => account::two_factor_page(app, request).await?,
         "/account/two-factor" if post => account::two_factor_submit(app, request).await?,
+        "/.well-known/openid-configuration" if get => oidc::discovery(app),
+        "/jwks" if get => oidc::jwks(app),
+        "/authorize" if get => oidc::authorize(app, request, &request.query).await?,
+        "/authorize" if post => oidc::authorize(app, request, &request.form).await?,
+        "/authorize/continue" if get => oidc::resume(app, request).await?,
+        "/authorize/continue" if post => oidc::decide(app, request).await?,
+        "/token" if post => oidc::token(app, request).await?,
+        "/userinfo" if get || post => oidc::userinfo(app, request).await?,
+        "/introspect" if post => oidc::introspect(app, request).await?,
+        "/revoke" if post => oidc::revoke(app, request).await?,
+        "/end-session" if get || post => oidc::end_session(app, request).await?,
         path if get => return Ok(static_files::serve(path)),
         _ => return Ok(None),
     };

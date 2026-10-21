@@ -4,9 +4,13 @@
 //! queries never block the runtime and never interleave; a closure is the natural place for a
 //! transaction.
 
+pub(crate) mod apps;
 pub(crate) mod audit;
+pub(crate) mod grants;
+pub(crate) mod groups;
 pub(crate) mod sessions;
 pub(crate) mod settings;
+pub(crate) mod signing_keys;
 pub(crate) mod users;
 
 use std::path::{Path, PathBuf};

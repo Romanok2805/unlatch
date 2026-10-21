@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use super::csrf::{self, Csrf};
 use super::i18n::Lang;
 use super::layout::{auth_page, error_notice, icon};
+use super::oidc::client_name_for;
 use super::{App, Failure, is_local_path, session};
 use crate::crypto::password::{self, PasswordHash};
 use crate::crypto::{sha256, totp};
@@ -110,13 +111,21 @@ fn next(request: &Request) -> String {
         .unwrap_or_else(|| "/".to_owned())
 }
 
-/// `GET /login`
+/// `GET /login`. With `force=1` the form is shown even to someone signed in, because the
+/// application asked for a fresh sign-in or the user wants another account.
 pub(super) async fn page(app: &App, request: &Request) -> Result<Response, Failure> {
     let next = next(request);
-    if session::current(app, request).await?.is_some() {
+    let force = request.query.single("force").ok().flatten() == Some("1");
+    if !force && session::current(app, request).await?.is_some() {
         return Ok(Response::redirect(next));
     }
-    login_page(app, request, "", &next, None)
+    let hint = request
+        .query
+        .single("username")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    login_page(app, request, hint, &next, None)
 }
 
 fn login_page(
@@ -131,6 +140,9 @@ fn login_page(
     let csrf = Csrf::for_page(app, request)?;
     let mut content = Html::new();
     html!(content, "<h1>", { text.sign_in_title }, "</h1>");
+    if let Some(client) = client_name_for(app, next) {
+        html!(content, "<p>", { text.sign_in_to }, " ", { client }, "</p>");
+    }
     if let Some(problem) = problem {
         html!(content, { error_notice(problem) });
     }

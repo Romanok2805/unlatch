@@ -55,15 +55,42 @@ pub(crate) fn find(
     token_hash: &TokenHash,
     now: i64,
 ) -> Result<Option<ActiveSession>, DbError> {
+    find_where(conn, "sessions.token_hash = ?1", &token_hash.0, now)
+}
+
+/// A session by its row, with the same conditions as [`find`].
+pub(crate) fn by_id(
+    conn: &Connection,
+    id: SessionId,
+    now: i64,
+) -> Result<Option<ActiveSession>, DbError> {
+    find_where(conn, "sessions.id = ?1", &id.0, now)
+}
+
+/// A session by its `sid`, with the same conditions as [`find`].
+pub(crate) fn by_public_id(
+    conn: &Connection,
+    public_id: &str,
+    now: i64,
+) -> Result<Option<ActiveSession>, DbError> {
+    find_where(conn, "sessions.public_id = ?1", &public_id, now)
+}
+
+fn find_where(
+    conn: &Connection,
+    condition: &str,
+    key: &dyn rusqlite::ToSql,
+    now: i64,
+) -> Result<Option<ActiveSession>, DbError> {
     let sql = format!(
         "SELECT {}, sessions.id AS session_id, sessions.public_id, sessions.amr,
                 sessions.auth_time, sessions.verified_at, sessions.last_seen_at
          FROM sessions JOIN users ON users.id = sessions.user_id
-         WHERE sessions.token_hash = ?1 AND sessions.expires_at > ?2 AND NOT users.disabled",
+         WHERE {condition} AND sessions.expires_at > ?2 AND NOT users.disabled",
         users::COLUMNS
     );
     Ok(conn
-        .query_row(&sql, params![token_hash.0, now], |row| {
+        .query_row(&sql, params![key, now], |row| {
             Ok(ActiveSession {
                 user: users::from_row(row)?,
                 id: SessionId(row.get("session_id")?),

@@ -113,11 +113,19 @@ async fn run(config: Config) -> Result<(), String> {
 /// Audit entries are kept this long; they contain IP addresses, which are personal data.
 const AUDIT_RETENTION: i64 = 180 * 24 * 60 * 60;
 
-/// Deletes expired sessions, codes and links, and old audit entries, once an hour.
+/// Deletes expired sessions, codes and links, and old audit entries, once an hour, and rotates
+/// signing keys when they are due, checked once a day.
 async fn housekeeping(app: Arc<App>) {
     let mut hourly = tokio::time::interval(Duration::from_hours(1));
+    let mut hours: u32 = 0;
     loop {
         hourly.tick().await;
+        hours = hours.wrapping_add(1);
+        if hours.is_multiple_of(24)
+            && let Err(e) = app.refresh_keys().await
+        {
+            error!("rotating signing keys failed: {e}");
+        }
         let now = time::now();
         let result = app
             .db

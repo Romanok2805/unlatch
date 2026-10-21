@@ -35,7 +35,7 @@ impl Form {
                 return Err(FormError::TooManyFields);
             }
             let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
-            fields.push((decode(name)?, decode(value)?));
+            fields.push((decode_component(name)?, decode_component(value)?));
         }
         Ok(Self(fields))
     }
@@ -64,7 +64,8 @@ impl Form {
     }
 }
 
-fn decode(text: &str) -> Result<String, FormError> {
+/// Decodes one name or value.
+pub(crate) fn decode_component(text: &str) -> Result<String, FormError> {
     let mut bytes = Vec::with_capacity(text.len());
     let mut input = text.bytes();
     while let Some(byte) = input.next() {
@@ -151,6 +152,6 @@ mod tests {
         let text = "a b&c=d/é~";
         let encoded = encode(text);
         assert_eq!(encoded, "a%20b%26c%3Dd%2F%C3%A9~");
-        assert_eq!(decode(&encoded).unwrap(), text);
+        assert_eq!(decode_component(&encoded).unwrap(), text);
     }
 }
