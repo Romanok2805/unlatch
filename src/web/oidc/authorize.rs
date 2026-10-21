@@ -34,12 +34,17 @@ pub(crate) async fn authorize(
         Err(Rejection::Redirect {
             redirect_uri,
             state,
+            form_post,
             error,
             description,
         }) => Ok(error_redirect(
             app,
-            &redirect_uri,
-            state.as_deref(),
+            request,
+            &ReplyTo {
+                redirect_uri: &redirect_uri,
+                state: state.as_deref(),
+                form_post,
+            },
             error,
             description,
         )),
@@ -50,21 +55,77 @@ fn continue_url(sealed: &str) -> String {
     format!("{CONTINUE}?req={sealed}")
 }
 
-/// An error sent back to the client with `iss`, so the client can tell which server answered
-/// (RFC 9207).
+/// Where and how to answer the client.
+struct ReplyTo<'a> {
+    redirect_uri: &'a str,
+    state: Option<&'a str>,
+    form_post: bool,
+}
+
+impl AuthRequest {
+    fn reply_to(&self) -> ReplyTo<'_> {
+        ReplyTo {
+            redirect_uri: &self.redirect_uri,
+            state: self.state.as_deref(),
+            form_post: self.form_post,
+        }
+    }
+}
+
+/// An error sent back to the client.
 fn error_redirect(
     app: &App,
-    redirect_uri: &str,
-    state: Option<&str>,
+    request: &Request,
+    to: &ReplyTo<'_>,
     error: &str,
     description: &str,
 ) -> Response {
-    let mut pairs = vec![("error", error), ("error_description", description)];
-    if let Some(state) = state {
+    send_back(
+        app,
+        request,
+        to,
+        &[("error", error), ("error_description", description)],
+    )
+}
+
+/// Sends parameters to the client with its `state` and our `iss`, so it can tell which server
+/// answered (RFC 9207): in the query of a redirect, or in a form the browser posts, which keeps
+/// codes out of URLs and logs.
+fn send_back(app: &App, request: &Request, to: &ReplyTo<'_>, pairs: &[(&str, &str)]) -> Response {
+    let mut pairs = pairs.to_vec();
+    if let Some(state) = to.state {
         pairs.push(("state", state));
     }
     pairs.push(("iss", app.config.issuer.as_str()));
-    Response::redirect(append_query(redirect_uri, &pairs))
+    if !to.form_post {
+        return Response::redirect(append_query(to.redirect_uri, &pairs));
+    }
+    let lang = Lang::of(request);
+    let text = lang.text();
+    let mut content = Html::new();
+    html!(
+        content,
+        "<form method=\"post\" action=\"",
+        { to.redirect_uri },
+        "\" data-autosubmit-form>"
+    );
+    for (name, value) in &pairs {
+        html!(
+            content,
+            "<input type=\"hidden\" name=\"",
+            { name },
+            "\" value=\"",
+            { value },
+            "\">"
+        );
+    }
+    html!(
+        content,
+        "<button class=\"primary block\">",
+        { text.continue_setup },
+        "</button></form>"
+    );
+    Response::html(auth_page(app, request, lang, text.continue_setup, &content))
 }
 
 /// The name of the application a sign-in is for, when the sign-in continues an authorization.
@@ -102,7 +163,7 @@ async fn next_step(
     let stale = auth
         .max_age
         .is_some_and(|max_age| now.saturating_sub(session.auth_time) > max_age);
-    if (auth.prompt_login && session.auth_time < auth.issued_at) || stale {
+    if (auth.prompt.login && session.auth_time < auth.issued_at) || stale {
         return Ok(Next::SignIn { force: true });
     }
     let (app_record, user) = (client.clone(), session.user.id);
@@ -123,7 +184,7 @@ async fn next_step(
         auth.scopes()
             .all(|scope| granted.split(' ').any(|g| g == scope))
     });
-    if auth.prompt_consent || !(client.skip_consent || covered) {
+    if auth.prompt.consent || !(client.skip_consent || covered) {
         return Ok(Next::Consent(session));
     }
     Ok(Next::Code(session))
@@ -145,17 +206,17 @@ pub(crate) async fn resume(app: &App, request: &Request) -> Result<Response, Fai
     if !client.enabled {
         return Ok(error_redirect(
             app,
-            &auth.redirect_uri,
-            auth.state.as_deref(),
+            request,
+            &auth.reply_to(),
             "unauthorized_client",
             "the application is disabled",
         ));
     }
     match next_step(app, request, &auth, &client).await? {
-        Next::SignIn { .. } if auth.prompt_none => Ok(error_redirect(
+        Next::SignIn { .. } if auth.prompt.none => Ok(error_redirect(
             app,
-            &auth.redirect_uri,
-            auth.state.as_deref(),
+            request,
+            &auth.reply_to(),
             "login_required",
             "the user isn't signed in",
         )),
@@ -170,23 +231,23 @@ pub(crate) async fn resume(app: &App, request: &Request) -> Result<Response, Fai
             }
             Ok(Response::redirect(url))
         }
-        Next::NoAccess(_) if auth.prompt_none => Ok(error_redirect(
+        Next::NoAccess(_) if auth.prompt.none => Ok(error_redirect(
             app,
-            &auth.redirect_uri,
-            auth.state.as_deref(),
+            request,
+            &auth.reply_to(),
             "access_denied",
             "the user may not use this application",
         )),
         Next::NoAccess(session) => no_access(app, request, &auth, &session),
-        Next::Consent(_) if auth.prompt_none => Ok(error_redirect(
+        Next::Consent(_) if auth.prompt.none => Ok(error_redirect(
             app,
-            &auth.redirect_uri,
-            auth.state.as_deref(),
+            request,
+            &auth.reply_to(),
             "consent_required",
             "the user hasn't consented",
         )),
         Next::Consent(session) => consent_page(app, request, &auth, &client, &session),
-        Next::Code(session) => issue_code(app, &auth, &client, &session).await,
+        Next::Code(session) => issue_code(app, request, &auth, &client, &session).await,
     }
 }
 
@@ -219,8 +280,8 @@ pub(crate) async fn decide(app: &App, request: &Request) -> Result<Response, Fai
     if request.form.single("decision").ok().flatten() != Some("allow") {
         return Ok(error_redirect(
             app,
-            &auth.redirect_uri,
-            auth.state.as_deref(),
+            request,
+            &auth.reply_to(),
             "access_denied",
             "the user declined",
         ));
@@ -229,12 +290,13 @@ pub(crate) async fn decide(app: &App, request: &Request) -> Result<Response, Fai
     app.db
         .run(move |conn| apps::save_consent(conn, app_id, user, &scope))
         .await?;
-    issue_code(app, &auth, &client, &session).await
+    issue_code(app, request, &auth, &client, &session).await
 }
 
 /// Stores a code for one minute and sends it to the client.
 async fn issue_code(
     app: &App,
+    request: &Request,
     auth: &AuthRequest,
     client: &AppRecord,
     session: &ActiveSession,
@@ -266,12 +328,12 @@ async fn issue_code(
             )
         })
         .await?;
-    let mut pairs = vec![("code", code.as_str())];
-    if let Some(state) = &auth.state {
-        pairs.push(("state", state));
-    }
-    pairs.push(("iss", app.config.issuer.as_str()));
-    Ok(Response::redirect(append_query(&auth.redirect_uri, &pairs)))
+    Ok(send_back(
+        app,
+        request,
+        &auth.reply_to(),
+        &[("code", code.as_str())],
+    ))
 }
 
 fn consent_page(

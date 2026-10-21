@@ -248,10 +248,19 @@ async fn dispatch(app: &App, request: &Request) -> Result<Option<Response>, Fail
         "/authorize" if post => oidc::authorize(app, request, &request.form).await?,
         "/authorize/continue" if get => oidc::resume(app, request).await?,
         "/authorize/continue" if post => oidc::decide(app, request).await?,
-        "/token" if post => oidc::token(app, request).await?,
-        "/userinfo" if get || post => oidc::userinfo(app, request).await?,
+        "/token" | "/userinfo" | "/revoke" if request.method == Method::OPTIONS => {
+            oidc::cors::preflight(app, request).await?
+        }
+        "/token" if post => {
+            oidc::cors::allow(app, request, oidc::token(app, request).await?).await?
+        }
+        "/userinfo" if get || post => {
+            oidc::cors::allow(app, request, oidc::userinfo(app, request).await?).await?
+        }
         "/introspect" if post => oidc::introspect(app, request).await?,
-        "/revoke" if post => oidc::revoke(app, request).await?,
+        "/revoke" if post => {
+            oidc::cors::allow(app, request, oidc::revoke(app, request).await?).await?
+        }
         "/end-session" if get || post => oidc::end_session(app, request).await?,
         "/account/sessions" if post => account::end_session(app, request).await?,
         "/account/providers" if post => providers::manage(app, request).await?,

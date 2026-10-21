@@ -30,3 +30,9 @@ for (const input of document.querySelectorAll("input[data-autosubmit]")) {
     }
   });
 }
+
+// A form that carries an answer to an application posts itself; the button stays for when
+// scripts are off.
+for (const form of document.querySelectorAll("form[data-autosubmit-form]")) {
+  form.submit();
+}

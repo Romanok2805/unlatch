@@ -24,7 +24,7 @@ struct Metadata<'a> {
     introspection_endpoint: String,
     scopes_supported: [&'static str; 5],
     response_types_supported: [&'static str; 1],
-    response_modes_supported: [&'static str; 1],
+    response_modes_supported: [&'static str; 2],
     grant_types_supported: [&'static str; 3],
     subject_types_supported: [&'static str; 1],
     id_token_signing_alg_values_supported: Vec<&'static str>,
@@ -55,7 +55,7 @@ pub(crate) fn discovery(app: &App) -> Response {
         introspection_endpoint: issuer.url("/introspect"),
         scopes_supported: SCOPES,
         response_types_supported: ["code"],
-        response_modes_supported: ["query"],
+        response_modes_supported: ["query", "form_post"],
         grant_types_supported: ["authorization_code", "refresh_token", "client_credentials"],
         subject_types_supported: ["public"],
         id_token_signing_alg_values_supported: Algorithm::ALL

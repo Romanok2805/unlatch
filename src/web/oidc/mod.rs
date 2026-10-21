@@ -2,6 +2,7 @@
 
 mod authorize;
 pub(crate) mod backchannel;
+pub(crate) mod cors;
 mod discovery;
 pub(crate) mod keys;
 mod logout;

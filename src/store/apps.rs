@@ -300,3 +300,23 @@ pub(crate) fn delete(conn: &Connection, id: AppId) -> Result<(), DbError> {
     conn.execute("DELETE FROM apps WHERE id = ?1", [id.0])?;
     Ok(())
 }
+
+/// The origins (`scheme://host[:port]`) of redirect URIs of enabled OpenID Connect clients.
+pub(crate) fn redirect_origins(conn: &Connection) -> Result<Vec<String>, DbError> {
+    let mut statement = conn.prepare(
+        "SELECT DISTINCT app_uris.uri FROM app_uris JOIN apps ON apps.id = app_uris.app_id
+         WHERE app_uris.purpose = 'redirect' AND apps.enabled AND apps.kind = 'oidc'",
+    )?;
+    let uris: Vec<String> = statement
+        .query_map([], |row| row.get(0))?
+        .collect::<Result<_, _>>()?;
+    let origins = uris
+        .iter()
+        .filter_map(|uri| {
+            let (scheme, rest) = uri.split_once("://")?;
+            let authority = rest.split(['/', '?']).next()?;
+            matches!(scheme, "https" | "http").then(|| format!("{scheme}://{authority}"))
+        })
+        .collect();
+    Ok(origins)
+}

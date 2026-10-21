@@ -47,11 +47,12 @@ pub(crate) struct AuthRequest {
     pub(crate) nonce: Option<String>,
     pub(crate) code_challenge: String,
     pub(crate) resource: Option<String>,
-    pub(crate) prompt_none: bool,
-    pub(crate) prompt_login: bool,
-    pub(crate) prompt_consent: bool,
+    pub(crate) prompt: Prompt,
     pub(crate) max_age: Option<i64>,
     pub(crate) login_hint: Option<String>,
+    /// Answer with a posted form instead of query parameters (OAuth 2.0 Form Post Response
+    /// Mode).
+    pub(crate) form_post: bool,
     pub(crate) issued_at: i64,
 }
 
@@ -85,6 +86,7 @@ pub(crate) enum Rejection {
     Redirect {
         redirect_uri: String,
         state: Option<String>,
+        form_post: bool,
         error: &'static str,
         description: &'static str,
     },
@@ -118,9 +120,11 @@ pub(crate) async fn check(
 
     let value = |name| form.single(name).ok().flatten();
     let state = value("state").map(str::to_owned);
+    let form_post = value("response_mode") == Some("form_post");
     let reject = |error, description| Rejection::Redirect {
         redirect_uri: redirect_uri.to_owned(),
         state: state.clone().filter(|state| state.len() <= MAX_STATE_LEN),
+        form_post,
         error,
         description,
     };
@@ -146,13 +150,12 @@ pub(crate) async fn check(
         nonce: value("nonce").map(str::to_owned),
         code_challenge: checked.challenge,
         resource: value("resource").map(str::to_owned),
-        prompt_none: checked.prompt.none,
-        prompt_login: checked.prompt.login,
-        prompt_consent: checked.prompt.consent,
+        prompt: checked.prompt,
         max_age: checked.max_age,
         login_hint: value("login_hint")
             .filter(|hint| hint.len() <= MAX_LOGIN_HINT_LEN)
             .map(str::to_owned),
+        form_post,
         issued_at: time::now(),
     };
     Ok(Ok((request, client)))
@@ -166,11 +169,15 @@ struct Checked {
     max_age: Option<i64>,
 }
 
-#[derive(Default)]
-struct Prompt {
-    none: bool,
-    login: bool,
-    consent: bool,
+/// What the client asked for with `prompt`.
+#[derive(Default, Serialize, Deserialize)]
+pub(crate) struct Prompt {
+    /// Don't show anything; fail if the user would have to act.
+    pub(crate) none: bool,
+    /// Sign in again, even if signed in already.
+    pub(crate) login: bool,
+    /// Ask for consent again.
+    pub(crate) consent: bool,
 }
 
 /// Checks everything but the client and redirect URI. Errors are `(error, description)` for
@@ -189,10 +196,10 @@ fn validate(form: &Form, client: &AppRecord) -> Result<Checked, (&'static str, &
             "only the code flow is supported",
         ));
     }
-    if value("response_mode").is_some_and(|mode| mode != "query") {
+    if value("response_mode").is_some_and(|mode| mode != "query" && mode != "form_post") {
         return Err((
             "invalid_request",
-            "only the query response mode is supported",
+            "use the query or form_post response mode",
         ));
     }
     if value("state").is_some_and(|state| state.len() > MAX_STATE_LEN) {
