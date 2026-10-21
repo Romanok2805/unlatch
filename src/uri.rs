@@ -5,12 +5,33 @@ use std::fmt;
 /// Longer than any real redirect URI, short enough to keep logs and tokens small.
 const MAX_LENGTH: usize = 2000;
 
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) struct InvalidRedirectUri(&'static str);
+/// Why a redirect URI was refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InvalidRedirectUri {
+    TooLong,
+    Whitespace,
+    Fragment,
+    NoHost,
+    PlainHttp,
+    Scheme,
+    UserInfo,
+    Port,
+    Host,
+}
 
 impl fmt::Display for InvalidRedirectUri {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.0)
+        f.write_str(match self {
+            Self::TooLong => "the address is too long",
+            Self::Whitespace => "the address contains spaces or control characters",
+            Self::Fragment => "the address has a fragment",
+            Self::NoHost => "the address has no host",
+            Self::PlainHttp => "plain http is only allowed for 127.0.0.1 and [::1]",
+            Self::Scheme => "use https, or a reverse domain scheme such as com.example.app:/path",
+            Self::UserInfo => "the host contains a user name or escapes",
+            Self::Port => "the port isn't a number",
+            Self::Host => "the host must be lowercase letters, digits, dots and dashes",
+        })
     }
 }
 
@@ -26,31 +47,25 @@ pub(crate) struct RedirectUri(String);
 impl RedirectUri {
     pub(crate) fn parse(text: &str) -> Result<Self, InvalidRedirectUri> {
         if text.len() > MAX_LENGTH {
-            return Err(InvalidRedirectUri("the address is too long"));
+            return Err(InvalidRedirectUri::TooLong);
         }
         if text.bytes().any(|b| b <= b' ' || b == 0x7f || b == b'\\') {
-            return Err(InvalidRedirectUri(
-                "the address contains spaces or control characters",
-            ));
+            return Err(InvalidRedirectUri::Whitespace);
         }
         if text.contains('#') {
-            return Err(InvalidRedirectUri("the address has a fragment"));
+            return Err(InvalidRedirectUri::Fragment);
         }
-        let (scheme, rest) = text
-            .split_once(':')
-            .ok_or(InvalidRedirectUri("the address has no scheme"))?;
+        let (scheme, rest) = text.split_once(':').ok_or(InvalidRedirectUri::Scheme)?;
         match scheme {
             "https" => {
                 let authority = authority(rest)?;
                 if authority.host.is_empty() {
-                    return Err(InvalidRedirectUri("the address has no host"));
+                    return Err(InvalidRedirectUri::NoHost);
                 }
             }
             "http" => {
                 if !authority(rest)?.is_loopback() {
-                    return Err(InvalidRedirectUri(
-                        "plain http is only allowed for 127.0.0.1 and [::1]",
-                    ));
+                    return Err(InvalidRedirectUri::PlainHttp);
                 }
             }
             _ => {
@@ -60,9 +75,7 @@ impl RedirectUri {
                         .chars()
                         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "+-.".contains(c));
                 if !valid || !rest.starts_with('/') || rest.starts_with("//") {
-                    return Err(InvalidRedirectUri(
-                        "use https, or a reverse domain scheme such as com.example.app:/path",
-                    ));
+                    return Err(InvalidRedirectUri::Scheme);
                 }
             }
         }
@@ -116,21 +129,17 @@ impl Authority<'_> {
 
 /// Splits `//host:port/path?query` into the host and the rest, checking what we rely on.
 fn authority(rest: &str) -> Result<Authority<'_>, InvalidRedirectUri> {
-    let rest = rest
-        .strip_prefix("//")
-        .ok_or(InvalidRedirectUri("the address has no host"))?;
+    let rest = rest.strip_prefix("//").ok_or(InvalidRedirectUri::NoHost)?;
     let end = rest.find(['/', '?']).unwrap_or(rest.len());
     let (host_and_port, path_and_query) = rest.split_at_checked(end).unwrap_or((rest, ""));
     if host_and_port.contains(['@', '%']) {
-        return Err(InvalidRedirectUri(
-            "the host contains a user name or escapes",
-        ));
+        return Err(InvalidRedirectUri::UserInfo);
     }
     // The port starts after the closing bracket of an IPv6 address, or at the first colon.
     let port_start = if host_and_port.starts_with('[') {
         host_and_port
             .find(']')
-            .ok_or(InvalidRedirectUri("the IPv6 address isn't closed"))?
+            .ok_or(InvalidRedirectUri::Host)?
             .saturating_add(1)
     } else {
         host_and_port.find(':').unwrap_or(host_and_port.len())
@@ -140,18 +149,16 @@ fn authority(rest: &str) -> Result<Authority<'_>, InvalidRedirectUri> {
         .unwrap_or((host_and_port, ""));
     if let Some(port) = port.strip_prefix(':') {
         if port.parse::<u16>().is_err() {
-            return Err(InvalidRedirectUri("the port isn't a number"));
+            return Err(InvalidRedirectUri::Port);
         }
     } else if !port.is_empty() {
-        return Err(InvalidRedirectUri("the host is malformed"));
+        return Err(InvalidRedirectUri::Host);
     }
     let host_chars_valid = host
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || "-.[]:".contains(c));
     if !host_chars_valid || host.chars().any(|c| c.is_ascii_uppercase()) {
-        return Err(InvalidRedirectUri(
-            "the host must be lowercase letters, digits, dots and dashes",
-        ));
+        return Err(InvalidRedirectUri::Host);
     }
     Ok(Authority {
         host,

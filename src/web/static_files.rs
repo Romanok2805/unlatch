@@ -17,11 +17,16 @@ struct Asset {
     body: &'static [u8],
 }
 
-const ASSETS: [Asset; 2] = [
+const ASSETS: [Asset; 3] = [
     Asset {
         name: "style.css",
         content_type: "text/css; charset=utf-8",
         body: include_bytes!("../../assets/style.css"),
+    },
+    Asset {
+        name: "app.js",
+        content_type: "text/javascript; charset=utf-8",
+        body: include_bytes!("../../assets/app.js"),
     },
     Asset {
         name: "icons.svg",

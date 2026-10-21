@@ -144,3 +144,53 @@ pub(crate) fn delete_for_user(
     )?;
     Ok(())
 }
+
+pub(crate) struct SessionSummary {
+    pub(crate) id: SessionId,
+    pub(crate) username: String,
+    pub(crate) ip: String,
+    pub(crate) user_agent: String,
+    pub(crate) auth_time: i64,
+    pub(crate) last_seen_at: i64,
+}
+
+/// Active sessions, newest activity first; of one user, or of everyone.
+pub(crate) fn list(
+    conn: &Connection,
+    user: Option<UserId>,
+    now: i64,
+) -> Result<Vec<SessionSummary>, DbError> {
+    let mut statement = conn.prepare(
+        "SELECT sessions.id, users.username, sessions.ip, sessions.user_agent, sessions.auth_time,
+                sessions.last_seen_at
+         FROM sessions JOIN users ON users.id = sessions.user_id
+         WHERE sessions.expires_at > ?1 AND (?2 IS NULL OR sessions.user_id = ?2)
+         ORDER BY sessions.last_seen_at DESC",
+    )?;
+    let sessions = statement
+        .query_map(params![now, user.map(|user| user.0)], |row| {
+            Ok(SessionSummary {
+                id: SessionId(row.get(0)?),
+                username: row.get(1)?,
+                ip: row.get(2)?,
+                user_agent: row.get(3)?,
+                auth_time: row.get(4)?,
+                last_seen_at: row.get(5)?,
+            })
+        })?
+        .collect::<Result<_, _>>()?;
+    Ok(sessions)
+}
+
+/// Ends a session if it belongs to `user`, or any session with `None`.
+pub(crate) fn delete_owned(
+    conn: &Connection,
+    id: SessionId,
+    user: Option<UserId>,
+) -> Result<(), DbError> {
+    conn.execute(
+        "DELETE FROM sessions WHERE id = ?1 AND (?2 IS NULL OR user_id = ?2)",
+        params![id.0, user.map(|user| user.0)],
+    )?;
+    Ok(())
+}

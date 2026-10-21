@@ -3,6 +3,7 @@
 use rusqlite::{Connection, OptionalExtension as _, Row, params};
 
 use super::DbError;
+use super::groups::GroupId;
 use crate::crypto::TokenHash;
 use crate::crypto::password::PasswordHash;
 
@@ -223,6 +224,79 @@ pub(crate) fn password_link_user(
 
 pub(crate) fn delete_password_links(conn: &Connection, id: UserId) -> Result<(), DbError> {
     conn.execute("DELETE FROM password_links WHERE user_id = ?1", [id.0])?;
+    Ok(())
+}
+
+pub(crate) fn list(conn: &Connection) -> Result<Vec<User>, DbError> {
+    let mut statement = conn.prepare(&format!("SELECT {COLUMNS} FROM users ORDER BY username"))?;
+    let users = statement
+        .query_map([], from_row)?
+        .collect::<Result<_, _>>()?;
+    Ok(users)
+}
+
+/// The settings an administrator edits.
+pub(crate) struct UserChanges {
+    pub(crate) display_name: String,
+    pub(crate) email: Option<String>,
+    pub(crate) email_verified: bool,
+    pub(crate) is_admin: bool,
+    pub(crate) disabled: bool,
+    pub(crate) groups: Vec<GroupId>,
+}
+
+pub(crate) fn update(
+    conn: &mut Connection,
+    id: UserId,
+    changes: &UserChanges,
+) -> Result<(), DbError> {
+    let tx = conn.transaction()?;
+    tx.execute(
+        "UPDATE users SET display_name = ?2, email = ?3, email_verified = ?4, is_admin = ?5,
+                          disabled = ?6
+         WHERE id = ?1",
+        params![
+            id.0,
+            changes.display_name,
+            changes.email,
+            changes.email_verified,
+            changes.is_admin,
+            changes.disabled
+        ],
+    )?;
+    tx.execute("DELETE FROM group_members WHERE user_id = ?1", [id.0])?;
+    for group in &changes.groups {
+        tx.execute(
+            "INSERT INTO group_members (group_id, user_id) VALUES (?1, ?2)",
+            params![group.0, id.0],
+        )?;
+    }
+    if changes.disabled {
+        tx.execute("DELETE FROM sessions WHERE user_id = ?1", [id.0])?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+pub(crate) fn groups(conn: &Connection, id: UserId) -> Result<Vec<GroupId>, DbError> {
+    let mut statement = conn.prepare("SELECT group_id FROM group_members WHERE user_id = ?1")?;
+    let groups = statement
+        .query_map([id.0], |row| row.get(0).map(GroupId))?
+        .collect::<Result<_, _>>()?;
+    Ok(groups)
+}
+
+/// Administrators who can still sign in. The last one can't be demoted, disabled or deleted.
+pub(crate) fn active_admin_count(conn: &Connection) -> Result<i64, DbError> {
+    Ok(conn.query_row(
+        "SELECT count(*) FROM users WHERE is_admin AND NOT disabled",
+        [],
+        |row| row.get(0),
+    )?)
+}
+
+pub(crate) fn delete(conn: &Connection, id: UserId) -> Result<(), DbError> {
+    conn.execute("DELETE FROM users WHERE id = ?1", [id.0])?;
     Ok(())
 }
 

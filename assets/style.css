@@ -239,6 +239,10 @@ input[type="checkbox"] {
   color: var(--text-3);
 }
 
+.password .reveal[aria-pressed="true"] {
+  color: var(--text);
+}
+
 /* Buttons */
 
 button,
@@ -419,6 +423,10 @@ button:hover,
 
 .rows .icon {
   color: var(--text-2);
+}
+
+.auth h2 {
+  margin-top: 2rem;
 }
 
 .rows li > :last-child {
@@ -637,6 +645,28 @@ td a {
   color: var(--text-3);
 }
 
+/* Dangerous actions sit behind a disclosure, so one stray click can't trigger them. */
+.danger-zone summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--danger);
+  font-weight: 500;
+  list-style: none;
+}
+
+.danger-zone summary::-webkit-details-marker {
+  display: none;
+}
+
+.danger-zone[open] summary {
+  margin-bottom: 0.75rem;
+}
+
+.table form {
+  display: inline;
+}
+
 /* Settings pages: a title on the left, its fields on the right. */
 .section {
   display: grid;
@@ -646,7 +676,8 @@ td a {
   border-top: 1px solid var(--line);
 }
 
-.section > .stack {
+.section > .stack,
+.narrow {
   max-width: 34rem;
 }
 
@@ -666,6 +697,10 @@ td a {
 .secret span {
   flex: 1;
   overflow-wrap: anywhere;
+}
+
+.secret button.copied {
+  color: var(--success);
 }
 
 .secret button {

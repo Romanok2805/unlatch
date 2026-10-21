@@ -2,6 +2,7 @@
 
 use hyper::StatusCode;
 
+use super::csrf::Csrf;
 use super::i18n::Lang;
 use super::{App, static_files};
 use crate::form::encode;
@@ -48,6 +49,149 @@ pub(crate) fn auth_page(
     page
 }
 
+/// The sections of administration, in the order of the menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Section {
+    Apps,
+    Users,
+    Groups,
+    Sessions,
+    Log,
+    Settings,
+}
+
+impl Section {
+    const ALL: [Self; 6] = [
+        Self::Apps,
+        Self::Users,
+        Self::Groups,
+        Self::Sessions,
+        Self::Log,
+        Self::Settings,
+    ];
+
+    const fn path(self) -> &'static str {
+        match self {
+            Self::Apps => "/admin/apps",
+            Self::Users => "/admin/users",
+            Self::Groups => "/admin/groups",
+            Self::Sessions => "/admin/sessions",
+            Self::Log => "/admin/log",
+            Self::Settings => "/admin/settings",
+        }
+    }
+
+    const fn icon(self) -> &'static str {
+        match self {
+            Self::Apps => "layout-grid",
+            Self::Users => "user",
+            Self::Groups => "users",
+            Self::Sessions => "monitor-smartphone",
+            Self::Log => "scroll-text",
+            Self::Settings => "sliders-horizontal",
+        }
+    }
+
+    pub(crate) fn label(self, lang: Lang) -> &'static str {
+        let text = lang.text();
+        match self {
+            Self::Apps => text.section_apps,
+            Self::Users => text.section_users,
+            Self::Groups => text.section_groups,
+            Self::Sessions => text.section_sessions,
+            Self::Log => text.section_log,
+            Self::Settings => text.section_settings,
+        }
+    }
+}
+
+/// What the administration frame needs besides the content.
+pub(crate) struct Frame<'a> {
+    pub(crate) lang: Lang,
+    pub(crate) section: Section,
+    pub(crate) title: &'a str,
+    pub(crate) username: &'a str,
+    pub(crate) csrf: &'a Csrf,
+}
+
+/// An administration page: the sections on the left, the content on the right.
+pub(crate) fn admin_page(app: &App, frame: &Frame<'_>, content: &Html) -> Html {
+    let branding = app.branding();
+    let text = frame.lang.text();
+    let mut page = Html::new();
+    head(
+        &mut page,
+        frame.lang,
+        frame.title,
+        &branding.name,
+        &branding.accent,
+    );
+    html!(
+        page,
+        "<body><div class=\"app\"><aside class=\"sidebar\"><div class=\"brand\">",
+        { branding.name },
+        "</div><nav class=\"nav\">"
+    );
+    for section in Section::ALL {
+        html!(page, "<a href=\"", { section.path() }, "\"");
+        if section == frame.section {
+            html!(page, " aria-current=\"page\"");
+        }
+        html!(
+            page,
+            ">",
+            { icon(section.icon()) },
+            { section.label(frame.lang) },
+            "</a>"
+        );
+    }
+    html!(
+        page,
+        "</nav><div class=\"account\"><a href=\"/account\"><span>",
+        { frame.username },
+        "</span></a><form method=\"post\" action=\"/logout\">",
+        { frame.csrf.field() },
+        "<button class=\"quiet\" aria-label=\"",
+        { text.sign_out },
+        "\">",
+        { icon("log-out") },
+        "</button></form></div></aside><main class=\"content\">",
+        { content },
+        "</main></div></body></html>"
+    );
+    page
+}
+
+/// A button that shows the password in the field next to it. Hidden until the script runs.
+pub(crate) fn reveal_button(lang: Lang) -> Html {
+    let mut out = Html::new();
+    html!(
+        out,
+        "<button type=\"button\" class=\"reveal quiet\" aria-label=\"",
+        { lang.text().show_password },
+        "\" aria-pressed=\"false\" hidden>",
+        { icon("eye") },
+        "</button>"
+    );
+    out
+}
+
+/// A button that copies `value`. Hidden until the script runs.
+pub(crate) fn copy_button(lang: Lang, value: &str) -> Html {
+    let mut out = Html::new();
+    html!(
+        out,
+        "<button type=\"button\" class=\"quiet\" data-copy=\"",
+        { value },
+        "\" aria-label=\"",
+        { lang.text().copy },
+        "\" hidden>",
+        { icon("copy") },
+        "</button>"
+    );
+    out
+}
+
 fn head(page: &mut Html, lang: Lang, title: &str, name: &str, accent: &str) {
     html!(
         *page,
@@ -62,7 +206,9 @@ fn head(page: &mut Html, lang: Lang, title: &str, name: &str, accent: &str) {
         { static_files::url("style.css") },
         "\"><link rel=\"stylesheet\" href=\"/theme.css?v=",
         { encode(accent) },
-        "\"></head>"
+        "\"><script src=\"",
+        { static_files::url("app.js") },
+        "\" defer></script></head>"
     );
 }
 

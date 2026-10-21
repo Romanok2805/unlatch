@@ -25,3 +25,28 @@ pub(crate) fn record(conn: &Connection, entry: &Entry<'_>) -> Result<(), DbError
     )?;
     Ok(())
 }
+
+pub(crate) struct Recorded {
+    pub(crate) at: i64,
+    pub(crate) actor: String,
+    pub(crate) action: String,
+    pub(crate) target: String,
+    pub(crate) ip: String,
+}
+
+pub(crate) fn latest(conn: &Connection, limit: i64) -> Result<Vec<Recorded>, DbError> {
+    let mut statement = conn
+        .prepare("SELECT at, actor, action, target, ip FROM audit_log ORDER BY id DESC LIMIT ?1")?;
+    let entries = statement
+        .query_map([limit], |row| {
+            Ok(Recorded {
+                at: row.get(0)?,
+                actor: row.get(1)?,
+                action: row.get(2)?,
+                target: row.get(3)?,
+                ip: row.get(4)?,
+            })
+        })?
+        .collect::<Result<_, _>>()?;
+    Ok(entries)
+}

@@ -1,6 +1,7 @@
 //! The web interface and the protocol endpoints: shared state and routing.
 
 mod account;
+mod admin;
 mod csrf;
 mod i18n;
 mod layout;
@@ -8,6 +9,7 @@ mod limits;
 mod oidc;
 mod qr;
 mod session;
+mod session_table;
 pub(crate) mod setup;
 mod signin;
 mod static_files;
@@ -126,6 +128,13 @@ impl App {
         *self.signing.write().unwrap_or_else(PoisonError::into_inner) = Arc::new(ring);
     }
 
+    pub(crate) fn set_branding(&self, branding: Branding) {
+        *self
+            .branding
+            .write()
+            .unwrap_or_else(PoisonError::into_inner) = branding;
+    }
+
     pub(crate) fn branding(&self) -> Branding {
         self.branding
             .read()
@@ -166,7 +175,7 @@ impl From<CryptoError> for Failure {
 }
 
 /// `#rrggbb` in lowercase, the only form the theme accepts, so nothing else can reach the CSS.
-fn is_colour(value: &str) -> bool {
+pub(crate) fn is_colour(value: &str) -> bool {
     value.len() == 7
         && value.starts_with('#')
         && value
@@ -236,6 +245,10 @@ async fn dispatch(app: &App, request: &Request) -> Result<Option<Response>, Fail
         "/introspect" if post => oidc::introspect(app, request).await?,
         "/revoke" if post => oidc::revoke(app, request).await?,
         "/end-session" if get || post => oidc::end_session(app, request).await?,
+        "/account/sessions" if post => account::end_session(app, request).await?,
+        path if path == "/admin" || path.starts_with("/admin/") => {
+            return admin::route(app, request).await;
+        }
         path if get => return Ok(static_files::serve(path)),
         _ => return Ok(None),
     };

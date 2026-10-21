@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use super::csrf::{self, Csrf};
 use super::i18n::Lang;
-use super::layout::{auth_page, error_notice, icon};
+use super::layout::{auth_page, error_notice, icon, reveal_button};
 use super::oidc::client_name_for;
 use super::{App, Failure, is_local_path, session};
 use crate::crypto::password::{self, PasswordHash};
@@ -160,7 +160,9 @@ fn login_page(
         "</div><div><label for=\"password\">",
         { text.password },
         "</label><div class=\"password\"><input id=\"password\" name=\"password\" type=\"password\" ",
-        "autocomplete=\"current-password\" required></div></div><button class=\"primary block\">",
+        "autocomplete=\"current-password\" required>",
+        { reveal_button(lang) },
+        "</div></div><button class=\"primary block\">",
         { text.sign_in },
         "</button></form>"
     );
@@ -375,7 +377,7 @@ fn second_step_form(
             "<div><label for=\"code\" class=\"visually-hidden\">",
             { text.code },
             "</label><input id=\"code\" name=\"code\" class=\"code-input\" inputmode=\"numeric\" ",
-            "autocomplete=\"one-time-code\" maxlength=\"7\" required autofocus></div>"
+            "autocomplete=\"one-time-code\" maxlength=\"7\" required autofocus data-autosubmit></div>"
         ),
         Step::Recovery => html!(
             content,

@@ -3,15 +3,16 @@
 use super::csrf::{self, Csrf};
 use super::i18n::{Lang, Text};
 use super::layout::{auth_page, error_notice, icon, success_notice};
+use super::session_table::describe_device;
 use super::signin::{check_password, hash_password, recovery_code_hash, totp_context, verify_code};
 use super::{App, Failure, qr, session};
 use crate::crypto::{random_bytes, totp};
 use crate::encoding::{base32, base64url, decode_base64url};
 use crate::html::{Html, html};
 use crate::http::{Request, Response};
-use crate::store::sessions::{self, ActiveSession};
+use crate::store::sessions::{self, ActiveSession, SessionId, SessionSummary};
 use crate::store::{audit, users};
-use crate::time;
+use crate::time::{self, format_utc};
 
 const MIN_PASSWORD_CHARS: usize = 12;
 const MAX_PASSWORD_CHARS: usize = 256;
@@ -107,7 +108,30 @@ pub(super) async fn overview(app: &App, request: &Request) -> Result<Response, F
                 text.off
             }
         },
-        "</a></li></ul><form method=\"post\" action=\"/logout\">",
+        "</a></li>"
+    );
+    if user.is_admin {
+        html!(
+            content,
+            "<li>",
+            { icon("sliders-horizontal") },
+            "<span>",
+            { text.administration },
+            "</span><a href=\"/admin\">",
+            { text.open },
+            "</a></li>"
+        );
+    }
+    let (user_id, now) = (user.id, time::now());
+    let others = app
+        .db
+        .run(move |conn| sessions::list(conn, Some(user_id), now))
+        .await?;
+    html!(content, "</ul><h2>", { text.section_sessions }, "</h2>");
+    session_list(&mut content, text, &csrf, &others, session.id);
+    html!(
+        content,
+        "<form method=\"post\" action=\"/logout\">",
         { csrf.field() },
         "<button class=\"block\">",
         { icon("log-out") },
@@ -116,6 +140,72 @@ pub(super) async fn overview(app: &App, request: &Request) -> Result<Response, F
     );
     let page = auth_page(app, request, lang, text.account_title, &content);
     Ok(csrf.apply(app, Response::html(page)))
+}
+
+/// The user's sessions, each with a button that ends it, except the current one.
+fn session_list(
+    out: &mut Html,
+    text: &Text,
+    csrf: &Csrf,
+    list: &[SessionSummary],
+    current: SessionId,
+) {
+    html!(*out, "<ul class=\"rows\">");
+    for other in list {
+        html!(
+            *out,
+            "<li>",
+            { icon("monitor-smartphone") },
+            "<span>",
+            { describe_device(&other.user_agent) },
+            "<br><span class=\"field-note\">",
+            { other.ip },
+            " · ",
+            { format_utc(other.last_seen_at) },
+            "</span></span>"
+        );
+        if other.id == current {
+            html!(
+                *out,
+                "<span class=\"field-note\">",
+                { text.this_session },
+                "</span>"
+            );
+        } else {
+            html!(
+                *out,
+                "<form method=\"post\" action=\"/account/sessions\">",
+                { csrf.field() },
+                "<button class=\"compact\" name=\"session\" value=\"",
+                { other.id.0 },
+                "\">",
+                { text.end },
+                "</button></form>"
+            );
+        }
+        html!(*out, "</li>");
+    }
+    html!(*out, "</ul>");
+}
+
+/// `POST /account/sessions`: ends one of the user's other sessions.
+pub(super) async fn end_session(app: &App, request: &Request) -> Result<Response, Failure> {
+    let Some(session) = session::current(app, request).await? else {
+        return Ok(session::to_sign_in(request));
+    };
+    let id = request
+        .form
+        .single("session")
+        .ok()
+        .flatten()
+        .and_then(|id| id.parse().ok());
+    if let (true, Some(id)) = (csrf::verify(app, request), id) {
+        let (id, owner) = (SessionId(id), session.user.id);
+        app.db
+            .run(move |conn| sessions::delete_owned(conn, id, Some(owner)))
+            .await?;
+    }
+    Ok(Response::redirect("/account"))
 }
 
 /// `GET /account/password`
