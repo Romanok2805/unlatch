@@ -23,13 +23,6 @@ impl<T: Zeroize> Secret<T> {
     }
 }
 
-impl<T: Zeroize + AsRef<[u8]>> Secret<T> {
-    /// Compares in time that depends only on the lengths, not on where the values differ.
-    pub(crate) fn matches(&self, other: &[u8]) -> bool {
-        crate::crypto::constant_time_eq(self.0.as_ref(), other)
-    }
-}
-
 impl<T: Zeroize> Drop for Secret<T> {
     fn drop(&mut self) {
         self.0.zeroize();

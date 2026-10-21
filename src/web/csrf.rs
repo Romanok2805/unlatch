@@ -9,7 +9,7 @@ use super::App;
 use crate::crypto::{CryptoError, random_token};
 use crate::encoding::{base64url, decode_base64url};
 use crate::html::{Html, html};
-use crate::http::cookie::{self, SameSite, SetCookie};
+use crate::http::cookie::{self, SetCookie};
 use crate::http::{Request, Response};
 
 const COOKIE: &str = "csrf";
@@ -61,7 +61,6 @@ impl Csrf {
             name: &cookie::name(COOKIE, secure),
             value,
             max_age: None,
-            same_site: SameSite::Lax,
         };
         response.cookie(&cookie, secure)
     }

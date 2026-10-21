@@ -21,7 +21,7 @@ use crate::encoding::{base64url, decode_base64url};
 use crate::form::encode_pairs;
 use crate::html::{Html, html};
 use crate::http::client::Plain;
-use crate::http::cookie::{self, SameSite, SetCookie};
+use crate::http::cookie::{self, SetCookie};
 use crate::http::{Request, Response};
 use crate::log::{info, warning};
 use crate::store::audit;
@@ -232,7 +232,6 @@ async fn begin(
         name: &cookie::name(FLOW_COOKIE, secure),
         value: &sealed,
         max_age: Some(FLOW_LIFETIME),
-        same_site: SameSite::Lax,
     };
     Ok(Response::redirect(location).cookie(&cookie, secure))
 }
@@ -306,7 +305,6 @@ fn clear_flow(app: &App, response: Response) -> Response {
         name: &cookie::name(FLOW_COOKIE, secure),
         value: "",
         max_age: Some(0),
-        same_site: SameSite::Lax,
     };
     response.cookie(&cookie, secure)
 }
@@ -620,7 +618,20 @@ async fn create_account(
     } else {
         base
     };
-    let display_name = identity.name.clone().unwrap_or_else(|| local.to_owned());
+    // A provider's name may contain anything; keep what is safe to show and send.
+    let display_name: String = identity
+        .name
+        .as_deref()
+        .unwrap_or(local)
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(100)
+        .collect();
+    let display_name = if display_name.is_empty() {
+        local.to_owned()
+    } else {
+        display_name
+    };
     let (provider_id, subject) = (provider.id, identity.subject.clone());
     let created = app
         .db

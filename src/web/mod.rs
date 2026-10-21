@@ -3,6 +3,7 @@
 mod account;
 mod admin;
 mod csrf;
+mod forward_auth;
 mod i18n;
 mod layout;
 mod limits;
@@ -27,7 +28,7 @@ use self::oidc::keys::KeyRing;
 use crate::config::Config;
 use crate::crypto::{CryptoError, MacKey, SealingKey};
 use crate::http::client::Client;
-use crate::http::cookie::{SameSite, SetCookie};
+use crate::http::cookie::SetCookie;
 use crate::http::{Request, Response};
 use crate::log::error;
 use crate::store::{Db, DbError, settings};
@@ -254,6 +255,11 @@ async fn dispatch(app: &App, request: &Request) -> Result<Option<Response>, Fail
         "/end-session" if get || post => oidc::end_session(app, request).await?,
         "/account/sessions" if post => account::end_session(app, request).await?,
         "/account/providers" if post => providers::manage(app, request).await?,
+        "/forward-auth" => forward_auth::verify(app, request, false).await?,
+        "/forward-auth/nginx" => forward_auth::verify(app, request, true).await?,
+        "/proxy/start" if get => forward_auth::start(app, request).await?,
+        "/_unlatch/callback" if get => forward_auth::callback(app, request).await?,
+        "/_unlatch/logout" if get => forward_auth::sign_out(app, request).await?,
         path if get && path.starts_with("/login/") => {
             return provider_route(app, request, path).await;
         }
@@ -321,7 +327,6 @@ fn language(app: &App, request: &Request) -> Response {
         name: i18n::COOKIE,
         value: lang.code(),
         max_age: Some(365 * 24 * 60 * 60),
-        same_site: SameSite::Lax,
     };
     Response::redirect(back).cookie(&cookie, app.config.issuer.is_secure())
 }

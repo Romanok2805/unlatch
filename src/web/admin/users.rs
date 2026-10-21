@@ -7,7 +7,6 @@ use crate::crypto::{TokenHash, random_token};
 use crate::html::{Html, html};
 use crate::http::{Request, Response};
 use crate::store::groups::{self, Group, GroupId};
-use crate::store::sessions;
 use crate::store::users::{self, NewUser, User, UserChanges, UserId, Username};
 use crate::time;
 use crate::web::i18n::Text;
@@ -17,7 +16,6 @@ use crate::web::{App, Failure};
 
 /// Invitation and reset links work for three days.
 const LINK_LIFETIME: i64 = 3 * 24 * 60 * 60;
-const MAX_NAME_CHARS: usize = 100;
 const MAX_EMAIL_LEN: usize = 254;
 
 /// `GET /admin/users`
@@ -99,7 +97,7 @@ pub(super) async fn create(
         ));
     };
     let name = field(request, "name").to_owned();
-    if name.is_empty() || name.chars().count() > MAX_NAME_CHARS {
+    if !users::display_name_ok(&name) {
         return Ok(create_form(app, request, admin, Some(text.name_required)));
     }
     let Ok(email) = parse_email(field(request, "email")) else {
@@ -284,7 +282,7 @@ impl Draft {
     }
 
     fn check(&self, text: &Text) -> Result<UserChanges, &'static str> {
-        if self.display_name.is_empty() || self.display_name.chars().count() > MAX_NAME_CHARS {
+        if !users::display_name_ok(&self.display_name) {
             return Err(text.name_required);
         }
         let email = parse_email(&self.email).map_err(|()| text.email_invalid)?;

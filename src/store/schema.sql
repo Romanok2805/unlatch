@@ -144,6 +144,15 @@ CREATE TABLE session_apps (
     PRIMARY KEY (session_id, app_id)
 ) STRICT;
 
+-- One-time codes that carry a sign-in from Unlatch to a host behind forward authentication.
+CREATE TABLE proxy_codes (
+    code_hash BLOB PRIMARY KEY,
+    session_id INTEGER NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+    app_id INTEGER NOT NULL REFERENCES apps (id) ON DELETE CASCADE,
+    path TEXT NOT NULL,
+    expires_at INTEGER NOT NULL
+) STRICT;
+
 -- Per-host sessions of forward authentication.
 CREATE TABLE proxy_sessions (
     token_hash BLOB PRIMARY KEY,

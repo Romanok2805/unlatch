@@ -108,12 +108,6 @@ impl RedirectUri {
             _ => false,
         }
     }
-
-    /// The URI with parameters added to its query.
-    pub(crate) fn with_query(&self, query: &str) -> String {
-        let separator = if self.0.contains('?') { '&' } else { '?' };
-        format!("{}{separator}{query}", self.0)
-    }
 }
 
 struct Authority<'a> {

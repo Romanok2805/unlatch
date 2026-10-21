@@ -4,7 +4,7 @@ use hyper::{StatusCode, header};
 use serde::Serialize;
 
 use super::super::{App, Failure};
-use super::token::{authenticate, oauth_error};
+use super::token::authenticate;
 use super::tokens::{self, AccessClaims, UserClaims};
 use crate::crypto::verify_jwt;
 use crate::http::{Request, Response};

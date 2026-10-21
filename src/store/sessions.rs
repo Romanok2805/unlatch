@@ -133,18 +133,6 @@ pub(crate) fn delete(conn: &Connection, id: SessionId) -> Result<(), DbError> {
     Ok(())
 }
 
-pub(crate) fn delete_for_user(
-    conn: &Connection,
-    user_id: UserId,
-    except: Option<SessionId>,
-) -> Result<(), DbError> {
-    conn.execute(
-        "DELETE FROM sessions WHERE user_id = ?1 AND id IS NOT ?2",
-        params![user_id.0, except.map(|id| id.0)],
-    )?;
-    Ok(())
-}
-
 pub(crate) struct SessionSummary {
     pub(crate) id: SessionId,
     pub(crate) username: String,
@@ -180,19 +168,6 @@ pub(crate) fn list(
         })?
         .collect::<Result<_, _>>()?;
     Ok(sessions)
-}
-
-/// Ends a session if it belongs to `user`, or any session with `None`.
-pub(crate) fn delete_owned(
-    conn: &Connection,
-    id: SessionId,
-    user: Option<UserId>,
-) -> Result<(), DbError> {
-    conn.execute(
-        "DELETE FROM sessions WHERE id = ?1 AND (?2 IS NULL OR user_id = ?2)",
-        params![id.0, user.map(|user| user.0)],
-    )?;
-    Ok(())
 }
 
 /// The sessions of a user, except one.

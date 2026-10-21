@@ -20,7 +20,7 @@ use crate::crypto::{sha256, totp};
 use crate::encoding::{base64url, decode_base64url};
 use crate::form::encode;
 use crate::html::{Html, html};
-use crate::http::cookie::{self, SameSite, SetCookie};
+use crate::http::cookie::{self, SetCookie};
 use crate::http::{Request, Response};
 use crate::log::info;
 use crate::secret::Secret;
@@ -330,7 +330,6 @@ fn set_pending(
         name: &cookie::name(PENDING_COOKIE, secure),
         value: &sealed,
         max_age: Some(PENDING_LIFETIME),
-        same_site: SameSite::Lax,
     };
     Ok(response.cookie(&cookie, secure))
 }
@@ -357,7 +356,6 @@ fn clear_pending(app: &App, response: Response) -> Response {
         name: &cookie::name(PENDING_COOKIE, secure),
         value: "",
         max_age: Some(0),
-        same_site: SameSite::Lax,
     };
     response.cookie(&cookie, secure)
 }

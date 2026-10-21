@@ -266,10 +266,6 @@ impl VerifyingKey {
         }
     }
 
-    pub(crate) fn kid(&self) -> &str {
-        &self.kid
-    }
-
     pub(crate) fn algorithm(&self) -> Algorithm {
         match self.material {
             Material::Rsa { .. } => Algorithm::Rs256,

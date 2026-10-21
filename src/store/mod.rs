@@ -9,6 +9,7 @@ pub(crate) mod audit;
 pub(crate) mod grants;
 pub(crate) mod groups;
 pub(crate) mod providers;
+pub(crate) mod proxy;
 pub(crate) mod sessions;
 pub(crate) mod settings;
 pub(crate) mod signing_keys;
@@ -125,6 +126,7 @@ pub(crate) fn delete_expired(
 ) -> Result<(), DbError> {
     conn.execute("DELETE FROM sessions WHERE expires_at <= ?1", [now])?;
     conn.execute("DELETE FROM codes WHERE expires_at <= ?1", [now])?;
+    conn.execute("DELETE FROM proxy_codes WHERE expires_at <= ?1", [now])?;
     conn.execute("DELETE FROM password_links WHERE expires_at <= ?1", [now])?;
     conn.execute(
         "DELETE FROM audit_log WHERE at < ?1",

@@ -6,7 +6,7 @@ use super::{App, Failure, csrf};
 use crate::crypto::{TokenHash, random_bytes, random_token};
 use crate::encoding::base64url;
 use crate::form::encode;
-use crate::http::cookie::{self, SameSite, SetCookie};
+use crate::http::cookie::{self, SetCookie};
 use crate::http::{Request, Response};
 use crate::store::sessions::{self, ActiveSession, NewSession, SessionId};
 use crate::store::users::UserId;
@@ -104,7 +104,6 @@ pub(crate) async fn start(
         name: &cookie_name(app),
         value: &token,
         max_age: Some(MAX_LIFETIME),
-        same_site: SameSite::Lax,
     };
     Ok(response.cookie(&cookie, secure))
 }
@@ -116,7 +115,6 @@ pub(crate) fn clear(app: &App, response: Response) -> Response {
         name: &cookie_name(app),
         value: "",
         max_age: Some(0),
-        same_site: SameSite::Lax,
     };
     response.cookie(&cookie, secure)
 }

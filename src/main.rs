@@ -1,9 +1,4 @@
 //! Unlatch: a small, self-hosted OpenID Connect provider.
-#![expect(
-    dead_code,
-    unused_imports,
-    reason = "parts used by the sign-in and protocol endpoints of later stages"
-)]
 
 mod config;
 mod crypto;

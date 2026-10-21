@@ -11,13 +11,12 @@ use crate::encoding::{base64url, decode_base64url};
 use crate::html::{Html, html};
 use crate::http::{Request, Response};
 use crate::store::users::{self, NewUser, Username};
-use crate::store::{audit, sessions, settings};
+use crate::store::{audit, settings};
 use crate::time;
 
 const SETUP_TOKEN: &str = "setup_token_hash";
 const SETUP_EXPIRES: &str = "setup_token_expires";
 const SETUP_LIFETIME: i64 = 24 * 60 * 60;
-const MAX_NAME_CHARS: usize = 100;
 
 /// Called at start-up. While there are no accounts, makes a new setup token and returns the
 /// link that uses it; Unlatch prints it to the log. Only a hash of the token is stored.
@@ -129,7 +128,7 @@ pub(super) async fn setup_submit(
     let Some(username) = Username::parse(field("username").trim()) else {
         return setup_form(app, request, Some(text.username_invalid)).map(Some);
     };
-    if name.is_empty() || name.chars().count() > MAX_NAME_CHARS {
+    if !users::display_name_ok(&name) {
         return setup_form(app, request, Some(text.name_required)).map(Some);
     }
     if let Some(problem) = password_problem(text, username.as_str(), field("new"), field("repeat"))

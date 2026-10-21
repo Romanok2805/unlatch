@@ -33,6 +33,12 @@ impl Username {
     }
 }
 
+/// A display name: up to 100 characters of any script, without control characters, since
+/// names travel in HTTP headers of forward authentication.
+pub(crate) fn display_name_ok(name: &str) -> bool {
+    !name.is_empty() && name.chars().count() <= 100 && !name.chars().any(char::is_control)
+}
+
 pub(crate) struct User {
     pub(crate) id: UserId,
     pub(crate) username: String,

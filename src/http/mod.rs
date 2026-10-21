@@ -34,6 +34,8 @@ pub(crate) struct Request {
     pub(crate) query: Form,
     pub(crate) form: Form,
     pub(crate) client_ip: IpAddr,
+    /// The address of the connection itself, which may be a proxy.
+    pub(crate) peer: IpAddr,
     headers: HeaderMap,
 }
 
@@ -64,6 +66,7 @@ impl Request {
         };
         Ok(Self {
             client_ip: client_ip(peer, &parts.headers, trusted_proxies),
+            peer: peer.to_canonical(),
             method: parts.method,
             path: parts.uri.path().to_owned(),
             target: parts
@@ -177,7 +180,7 @@ impl Response {
         *response.status_mut() = self.status;
         let headers = response.headers_mut();
         for (name, value) in self.headers {
-            let Ok(value) = HeaderValue::from_str(&value) else {
+            let Ok(value) = HeaderValue::from_bytes(value.as_bytes()) else {
                 crate::log::error!("dropped a response with an invalid {name} header");
                 let mut failed =
                     hyper::Response::new(Full::new(Bytes::from_static(b"internal error")));
