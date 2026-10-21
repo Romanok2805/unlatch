@@ -32,12 +32,15 @@ Some rules are enforced by types, so the compiler catches what a reviewer could 
 
 ## OpenID Connect
 
-Applications use the authorization code flow, and every client must use PKCE with S256. Unlatch
-also provides discovery, JWKS, userinfo, token revocation (RFC 7009), introspection (RFC 7662),
-RP-initiated and back-channel logout, the client credentials grant for services that call each
-other, and the `form_post` response mode. Authorization responses include `iss` (RFC 9207), so a
-client can't be tricked into mixing up responses from two providers. Browser apps may call the
-token, userinfo, revocation and PAR endpoints from the origin of one of their redirect URIs.
+Applications use the authorization code flow with PKCE (S256). An administrator can let an older
+confidential client go without PKCE; its secret then keeps a stolen code useless, and a code issued
+without PKCE is never redeemed with a verifier, so nobody can strip PKCE from a request unnoticed
+(RFC 9700). Public clients always need it. Unlatch also provides discovery, JWKS, userinfo, token
+revocation (RFC 7009), introspection (RFC 7662), RP-initiated and back-channel logout, the client
+credentials grant for services that call each other, and the `form_post` response mode.
+Authorization responses include `iss` (RFC 9207), so a client can't be tricked into mixing up
+responses from two providers. Browser apps may call the token, userinfo, revocation and PAR
+endpoints from the origin of one of their redirect URIs.
 
 An authorization request is checked, then carried sealed through sign-in and consent instead of
 being stored, so requests that are never finished cost nothing. Each step checks it again against
@@ -45,8 +48,8 @@ the application as registered at that moment.
 
 Left out on purpose:
 
-- the implicit and hybrid flows and the password grant, which put tokens or passwords where they can
-  leak;
+- the implicit and hybrid flows and the password grant, which put tokens or passwords where they
+  can leak;
 - `alg: none` and ID tokens signed with the client secret;
 - request objects and dynamic client registration, which add attack surface that a self-hosted
   setup doesn't need;
@@ -76,7 +79,8 @@ without a secret, so for such an app the user is asked every time, even after co
 
 Access tokens have `typ: at+jwt` (RFC 9068). A service can check them without asking Unlatch, and an
 ID token can't be passed off as one. A service that needs revocation to take effect at once can use
-introspection instead. Userinfo and introspection refuse tokens of a session that has ended.
+introspection instead. Userinfo and introspection refuse tokens of a session that has ended or of a
+grant that was revoked.
 
 Every access token names its audience: the client it was issued to, or an API the administrator
 registered for that client (RFC 8707). A token for one service is useless at another, and refreshing

@@ -326,6 +326,7 @@ struct Draft {
     skip_consent: bool,
     require_par: bool,
     require_dpop: bool,
+    require_pkce: bool,
     id_token_alg: String,
     backchannel_logout_uri: String,
     host: String,
@@ -346,6 +347,7 @@ impl Draft {
             skip_consent: record.skip_consent,
             require_par: record.require_par,
             require_dpop: record.require_dpop,
+            require_pkce: record.require_pkce,
             id_token_alg: record.id_token_alg.name().to_owned(),
             backchannel_logout_uri: record.backchannel_logout_uri.clone().unwrap_or_default(),
             host: record.host.clone().unwrap_or_default(),
@@ -356,7 +358,7 @@ impl Draft {
         }
     }
 
-    fn submitted(request: &Request) -> Self {
+    fn submitted(request: &Request, record: &AppRecord) -> Self {
         Self {
             name: field(request, "name").to_owned(),
             enabled: checked(request, "enabled"),
@@ -364,6 +366,8 @@ impl Draft {
             skip_consent: checked(request, "skip_consent"),
             require_par: checked(request, "require_par"),
             require_dpop: checked(request, "require_dpop"),
+            // A public client has nothing else protecting its codes, so it always needs PKCE.
+            require_pkce: record.client_secret_hash.is_none() || checked(request, "require_pkce"),
             id_token_alg: field(request, "id_token_alg").to_owned(),
             backchannel_logout_uri: field(request, "backchannel_logout_uri").to_owned(),
             host: field(request, "host").to_owned(),
@@ -409,6 +413,7 @@ impl Draft {
             skip_consent: self.skip_consent,
             require_par: self.require_par,
             require_dpop: self.require_dpop,
+            require_pkce: self.require_pkce,
             id_token_alg: Algorithm::from_name(&self.id_token_alg).unwrap_or(Algorithm::Rs256),
             backchannel_logout_uri,
             host,
@@ -498,7 +503,7 @@ pub(super) async fn edit(
             )))
         }
         _ => {
-            let draft = Draft::submitted(request);
+            let draft = Draft::submitted(request, &record);
             let changes = match draft.check(record.kind, text) {
                 Ok(changes) => changes,
                 Err(problem) => return Ok(view(&draft, Some(&problem))),
@@ -557,7 +562,7 @@ fn edit_form(
         "\">",
         { admin.csrf.field() }
     );
-    settings_sections(&mut content, admin, record.kind, draft, all_groups);
+    settings_sections(&mut content, admin, record, draft, all_groups);
     html!(
         content,
         "<section class=\"section\"><span></span><div class=\"stack\"><button class=\"primary\" ",
@@ -581,10 +586,11 @@ fn edit_form(
 fn settings_sections(
     out: &mut Html,
     admin: &Admin,
-    kind: Kind,
+    record: &AppRecord,
     draft: &Draft,
     all_groups: &[Group],
 ) {
+    let kind = record.kind;
     let text = admin.lang.text();
     html!(
         *out,
@@ -603,7 +609,7 @@ fn settings_sections(
             );
             text_input(out, text.host, "host", &draft.host, Some(text.host_note));
         }
-        Kind::Oidc => oidc_fields(out, admin, draft),
+        Kind::Oidc => oidc_fields(out, admin, draft, record.client_secret_hash.is_some()),
     }
     html!(
         *out,
@@ -642,7 +648,7 @@ fn settings_sections(
 }
 
 /// The OpenID Connect part of the application form.
-fn oidc_fields(out: &mut Html, admin: &Admin, draft: &Draft) {
+fn oidc_fields(out: &mut Html, admin: &Admin, draft: &Draft, confidential: bool) {
     let text = admin.lang.text();
     html!(
         *out,
@@ -698,6 +704,15 @@ fn oidc_fields(out: &mut Html, admin: &Admin, draft: &Draft) {
         "1",
         draft.require_dpop,
     );
+    if confidential {
+        checkbox(
+            out,
+            text.require_pkce,
+            "require_pkce",
+            "1",
+            draft.require_pkce,
+        );
+    }
 }
 
 /// What the administrator copies into the application, and a button for a new secret.

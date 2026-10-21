@@ -29,6 +29,8 @@ pub(crate) struct AppRecord {
     pub(crate) require_par: bool,
     /// Tokens must be bound to a key with DPoP (RFC 9449).
     pub(crate) require_dpop: bool,
+    /// Requests must use PKCE. Public clients always must, whatever this says.
+    pub(crate) require_pkce: bool,
     pub(crate) client_id: Option<String>,
     /// SHA-256 of the secret; `None` for public clients.
     pub(crate) client_secret_hash: Option<Vec<u8>>,
@@ -43,7 +45,7 @@ pub(crate) struct AppRecord {
 
 const COLUMNS: &str = "id, name, kind, enabled, all_users, skip_consent, client_id, \
                        client_secret_hash, id_token_alg, backchannel_logout_uri, host, \
-                       require_par, require_dpop";
+                       require_par, require_dpop, require_pkce";
 
 fn from_row(row: &Row<'_>) -> rusqlite::Result<AppRecord> {
     let kind: String = row.get(2)?;
@@ -66,6 +68,7 @@ fn from_row(row: &Row<'_>) -> rusqlite::Result<AppRecord> {
         host: row.get(10)?,
         require_par: row.get(11)?,
         require_dpop: row.get(12)?,
+        require_pkce: row.get(13)?,
         redirect_uris: Vec::new(),
         post_logout_uris: Vec::new(),
         resources: Vec::new(),
@@ -232,6 +235,7 @@ pub(crate) struct AppChanges {
     pub(crate) skip_consent: bool,
     pub(crate) require_par: bool,
     pub(crate) require_dpop: bool,
+    pub(crate) require_pkce: bool,
     pub(crate) id_token_alg: Algorithm,
     pub(crate) backchannel_logout_uri: Option<String>,
     pub(crate) host: Option<String>,
@@ -250,7 +254,8 @@ pub(crate) fn update(
     tx.execute(
         "UPDATE apps SET name = ?2, enabled = ?3, all_users = ?4, skip_consent = ?5,
                          id_token_alg = ?6, host = CASE WHEN kind = 'proxy' THEN ?7 ELSE NULL END,
-                         backchannel_logout_uri = ?8, require_par = ?9, require_dpop = ?10
+                         backchannel_logout_uri = ?8, require_par = ?9, require_dpop = ?10,
+                         require_pkce = ?11
          WHERE id = ?1",
         params![
             id.0,
@@ -262,7 +267,8 @@ pub(crate) fn update(
             changes.host,
             changes.backchannel_logout_uri,
             changes.require_par,
-            changes.require_dpop
+            changes.require_dpop,
+            changes.require_pkce
         ],
     )?;
     tx.execute("DELETE FROM app_uris WHERE app_id = ?1", [id.0])?;

@@ -5,12 +5,12 @@ use hyper::{StatusCode, header};
 use super::super::{App, Failure};
 use super::tokens::{self, Access, Holder, TokenResponse, UserClaims};
 use super::{ACCESS_TOKEN_LIFETIME, dpop};
-use crate::crypto::{TokenHash, constant_time_eq, sha256};
+use crate::crypto::{TokenHash, constant_time_eq, random_bytes, sha256};
 use crate::encoding::{base64url, decode_base64_standard};
 use crate::form::decode_component;
 use crate::http::{Request, Response};
 use crate::store::apps::{self, AppRecord, Kind};
-use crate::store::grants;
+use crate::store::grants::{self, NewGrant};
 use crate::store::groups;
 use crate::store::sessions::{self, ActiveSession};
 use crate::time;
@@ -172,20 +172,22 @@ async fn authorization_code(
     client: AppRecord,
     dpop: Option<String>,
 ) -> Result<Response, Failure> {
-    let form = |name| request.form.single(name).ok().flatten().unwrap_or_default();
+    let form = |name| request.form.single(name).ok().flatten();
     let (code, redirect_uri, verifier) = (
-        form("code"),
-        form("redirect_uri").to_owned(),
+        form("code").unwrap_or_default(),
+        form("redirect_uri").unwrap_or_default().to_owned(),
         form("code_verifier"),
     );
-    if !valid_verifier(verifier) {
-        return Ok(invalid_grant("code_verifier is missing or malformed"));
+    if verifier.is_some_and(|verifier| !valid_verifier(verifier)) {
+        return Ok(invalid_grant("code_verifier is malformed"));
     }
     let hash = TokenHash::of(code);
-    let challenge = base64url(&sha256(verifier.as_bytes()));
+    let challenge = verifier.map(|verifier| base64url(&sha256(verifier.as_bytes())));
     let now = time::now();
     let checked = client.clone();
     let (key, binding) = (dpop.clone(), grant_binding(&client, dpop.as_deref()));
+    let public_id = base64url(&random_bytes::<16>()?);
+    let grant_name = public_id.clone();
     let outcome = app
         .db
         .run(move |conn| {
@@ -197,10 +199,19 @@ async fn authorization_code(
                 grants::delete(conn, grant)?;
                 return Ok(Err("the code was already used"));
             }
+            // The verifier must match the challenge, and may only come with one: accepting it for
+            // a code issued without PKCE would hide a downgrade (RFC 9700 section 2.1.1).
+            let pkce_holds = match (&code.challenge, &challenge) {
+                (Some(expected), Some(actual)) => {
+                    constant_time_eq(expected.as_bytes(), actual.as_bytes())
+                }
+                (None, None) => true,
+                _ => false,
+            };
             if code.expires_at <= now
                 || code.app != checked.id
                 || code.redirect_uri != redirect_uri
-                || !constant_time_eq(challenge.as_bytes(), code.challenge.as_bytes())
+                || !pkce_holds
             {
                 return Ok(Err("the code is invalid"));
             }
@@ -216,11 +227,14 @@ async fn authorization_code(
             }
             let grant = grants::create(
                 conn,
-                session.id,
-                code.app,
-                &code.scope,
-                code.resource.as_deref(),
-                binding.as_deref(),
+                &NewGrant {
+                    session: session.id,
+                    app: code.app,
+                    public_id: &public_id,
+                    scope: &code.scope,
+                    resource: code.resource.as_deref(),
+                    dpop_jkt: binding.as_deref(),
+                },
             )?;
             grants::mark_redeemed(conn, &hash, grant)?;
             let groups = groups::names_for_user(conn, session.user.id)?;
@@ -236,6 +250,7 @@ async fn authorization_code(
         &client,
         &session,
         Issuance {
+            grant: &grant_name,
             scope: &code.scope,
             resource: code.resource.as_deref(),
             nonce: code.nonce.as_deref(),
@@ -330,6 +345,7 @@ async fn refresh(
         &client,
         &session,
         Issuance {
+            grant: &grant.public_id,
             scope: &scope,
             resource: grant.resource.as_deref(),
             nonce: None,
@@ -348,6 +364,8 @@ fn offline(scope: &str) -> bool {
 
 /// What a token response for a user is issued for.
 struct Issuance<'a> {
+    /// The public id of the grant.
+    grant: &'a str,
     scope: &'a str,
     resource: Option<&'a str>,
     nonce: Option<&'a str>,
@@ -378,6 +396,7 @@ fn issue(
         holder: Holder::User {
             subject: tokens::subject(app, session.user.id),
             session,
+            grant: issuance.grant,
         },
         scope,
         resource: issuance.resource,

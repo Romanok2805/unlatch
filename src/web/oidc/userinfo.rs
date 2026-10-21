@@ -33,11 +33,20 @@ async fn check_access_token(
         // A client credentials token belongs to no session.
         return Ok(Some((claims, None)));
     };
+    let Some(grant) = claims.grant.clone() else {
+        return Ok(None);
+    };
     let session = app
         .db
-        .run(move |conn| sessions::by_public_id(conn, &sid, now))
+        .run(move |conn| {
+            if !grants::is_active(conn, &grant)? {
+                return Ok(None);
+            }
+            sessions::by_public_id(conn, &sid, now)
+        })
         .await?;
-    // The session must still exist and still be the subject's, or the token is dead.
+    // The grant and the session must still exist, and the session must still be the subject's,
+    // or the token is dead.
     match session {
         Some(session) if tokens::subject(app, session.user.id) == claims.sub => {
             Ok(Some((claims, Some(session))))
@@ -46,10 +55,18 @@ async fn check_access_token(
     }
 }
 
-/// The access token in the `Authorization` header, and whether it came under the `DPoP` scheme
-/// (RFC 9449 section 7.1) rather than `Bearer`.
+/// The access token of a request, and whether it came under the `DPoP` scheme (RFC 9449 section
+/// 7.1) rather than as a bearer token. A bearer token may also come in a form body (RFC 6750
+/// section 2.2), but not both ways at once.
 fn presented_token(request: &Request) -> Option<(&str, bool)> {
-    let (scheme, token) = request.header(header::AUTHORIZATION)?.split_once(' ')?;
+    let in_body = request.form.single("access_token").ok().flatten();
+    let Some(authorization) = request.header(header::AUTHORIZATION) else {
+        return in_body.map(|token| (token, false));
+    };
+    if in_body.is_some() {
+        return None;
+    }
+    let (scheme, token) = authorization.split_once(' ')?;
     let dpop = if scheme.eq_ignore_ascii_case("DPoP") {
         true
     } else if scheme.eq_ignore_ascii_case("Bearer") {

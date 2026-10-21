@@ -65,6 +65,9 @@ CREATE TABLE apps (
     require_par INTEGER NOT NULL DEFAULT 0,
     -- Tokens must be bound to a key with DPoP (RFC 9449).
     require_dpop INTEGER NOT NULL DEFAULT 0,
+    -- Requests must use PKCE. Only a confidential client can do without, since its secret
+    -- protects the code.
+    require_pkce INTEGER NOT NULL DEFAULT 1,
     client_id TEXT UNIQUE,
     -- NULL for public clients, which authenticate with PKCE alone.
     client_secret_hash BLOB,
@@ -122,7 +125,8 @@ CREATE TABLE codes (
     redirect_uri TEXT NOT NULL,
     scope TEXT NOT NULL,
     nonce TEXT,
-    code_challenge TEXT NOT NULL,
+    -- NULL for a request without PKCE, which only a confidential client may make.
+    code_challenge TEXT,
     resource TEXT,
     -- Thumbprint of the DPoP key the code may only be redeemed with.
     dpop_jkt TEXT,
@@ -136,6 +140,8 @@ CREATE TABLE codes (
 -- means the token was copied, so the grant is revoked.
 CREATE TABLE grants (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    -- Names the grant in access tokens, so they stop working at our endpoints once it is revoked.
+    public_id TEXT NOT NULL UNIQUE,
     session_id INTEGER NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
     app_id INTEGER NOT NULL REFERENCES apps (id) ON DELETE CASCADE,
     scope TEXT NOT NULL,

@@ -47,7 +47,8 @@ pub(crate) struct AuthRequest {
     pub(crate) scope: String,
     pub(crate) state: Option<String>,
     pub(crate) nonce: Option<String>,
-    pub(crate) code_challenge: String,
+    /// `None` only for a confidential client allowed to go without PKCE.
+    pub(crate) code_challenge: Option<String>,
     pub(crate) resource: Option<String>,
     pub(crate) prompt: Prompt,
     pub(crate) max_age: Option<i64>,
@@ -158,6 +159,7 @@ pub(crate) async fn check(
 ) -> Result<Result<(AuthRequest, AppRecord), Rejection>, Failure> {
     if arrival == Arrival::Browser
         && let Ok(Some(request_uri)) = form.single("request_uri")
+        && request_uri.starts_with(REQUEST_URI_PREFIX)
     {
         return pushed(app, form, request_uri).await;
     }
@@ -201,7 +203,7 @@ pub(crate) async fn check(
             "this application must push its authorization requests",
         )));
     }
-    let checked = match validate(form, &client) {
+    let checked = match validate(form, &client, arrival) {
         Ok(checked) => checked,
         Err((error, description)) => return Ok(Err(reject(error, description))),
     };
@@ -252,7 +254,7 @@ async fn pushed(
 /// The parts of a request that needed parsing.
 struct Checked {
     scope: String,
-    challenge: String,
+    challenge: Option<String>,
     prompt: Prompt,
     max_age: Option<i64>,
 }
@@ -270,17 +272,28 @@ pub(crate) struct Prompt {
 
 /// Checks everything but the client and redirect URI. Errors are `(error, description)` for
 /// the redirect back to the client.
-fn validate(form: &Form, client: &AppRecord) -> Result<Checked, (&'static str, &'static str)> {
+fn validate(
+    form: &Form,
+    client: &AppRecord,
+    arrival: Arrival,
+) -> Result<Checked, (&'static str, &'static str)> {
     let value = |name: &str| form.single(name).ok().flatten();
     if value("request").is_some() {
         return Err(("request_not_supported", "request objects are not supported"));
     }
-    // Only a pushed request gets here with one, and it can't refer to another (RFC 9126).
+    // Our own request_uri values were taken care of already. Others would point to request
+    // objects, which we don't fetch, and a pushed request can't refer to another (RFC 9126).
     if value("request_uri").is_some() {
-        return Err((
-            "invalid_request",
-            "a pushed request can't have a request_uri",
-        ));
+        return Err(match arrival {
+            Arrival::Browser => (
+                "request_uri_not_supported",
+                "request_uri is only for pushed requests",
+            ),
+            Arrival::Pushed => (
+                "invalid_request",
+                "a pushed request can't have a request_uri",
+            ),
+        });
     }
     if value("response_type") != Some("code") {
         return Err((
@@ -300,13 +313,21 @@ fn validate(form: &Form, client: &AppRecord) -> Result<Checked, (&'static str, &
     if value("nonce").is_some_and(|nonce| nonce.len() > MAX_NONCE_LEN) {
         return Err(("invalid_request", "nonce is too long"));
     }
-    // PKCE with S256 is required of every client (OAuth 2.0 Security BCP, RFC 9700).
-    let challenge =
-        value("code_challenge").ok_or(("invalid_request", "code_challenge is required"))?;
-    if value("code_challenge_method") != Some("S256") {
+    // PKCE with S256 (RFC 9700). Only a confidential client may go without, if the administrator
+    // allowed it: its secret is then what keeps a stolen code useless.
+    let challenge = match value("code_challenge") {
+        Some(challenge) => Some(challenge),
+        None if client.require_pkce || client.client_secret_hash.is_none() => {
+            return Err(("invalid_request", "code_challenge is required"));
+        }
+        None => None,
+    };
+    if challenge.is_some() && value("code_challenge_method") != Some("S256") {
         return Err(("invalid_request", "code_challenge_method must be S256"));
     }
-    if decode_base64url(challenge).is_none_or(|digest| digest.len() != 32) {
+    if challenge.is_some_and(|challenge| {
+        decode_base64url(challenge).is_none_or(|digest| digest.len() != 32)
+    }) {
         return Err((
             "invalid_request",
             "code_challenge must be a base64url SHA-256 hash",
@@ -342,7 +363,7 @@ fn validate(form: &Form, client: &AppRecord) -> Result<Checked, (&'static str, &
         .collect();
     Ok(Checked {
         scope: granted.join(" "),
-        challenge: challenge.to_owned(),
+        challenge: challenge.map(str::to_owned),
         prompt,
         max_age,
     })

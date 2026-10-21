@@ -17,7 +17,7 @@ pub(crate) struct NewCode<'a> {
     pub(crate) redirect_uri: &'a str,
     pub(crate) scope: &'a str,
     pub(crate) nonce: Option<&'a str>,
-    pub(crate) code_challenge: &'a str,
+    pub(crate) code_challenge: Option<&'a str>,
     pub(crate) resource: Option<&'a str>,
     pub(crate) dpop_jkt: Option<&'a str>,
     pub(crate) expires_at: i64,
@@ -56,7 +56,7 @@ pub(crate) struct Code {
     pub(crate) redirect_uri: String,
     pub(crate) scope: String,
     pub(crate) nonce: Option<String>,
-    pub(crate) challenge: String,
+    pub(crate) challenge: Option<String>,
     pub(crate) resource: Option<String>,
     pub(crate) dpop_jkt: Option<String>,
     pub(crate) expires_at: i64,
@@ -104,6 +104,7 @@ pub(crate) fn mark_redeemed(
 
 pub(crate) struct Grant {
     pub(crate) id: GrantId,
+    pub(crate) public_id: String,
     pub(crate) session: SessionId,
     pub(crate) app: AppId,
     pub(crate) scope: String,
@@ -113,28 +114,32 @@ pub(crate) struct Grant {
     pub(crate) generation: i64,
 }
 
+pub(crate) struct NewGrant<'a> {
+    pub(crate) session: SessionId,
+    pub(crate) app: AppId,
+    /// Random; access tokens carry it.
+    pub(crate) public_id: &'a str,
+    pub(crate) scope: &'a str,
+    pub(crate) resource: Option<&'a str>,
+    pub(crate) dpop_jkt: Option<&'a str>,
+}
+
 /// Creates a grant, and remembers that the application took part in the session.
-pub(crate) fn create(
-    conn: &Connection,
-    session: SessionId,
-    app: AppId,
-    scope: &str,
-    resource: Option<&str>,
-    dpop_jkt: Option<&str>,
-) -> Result<GrantId, DbError> {
+pub(crate) fn create(conn: &Connection, grant: &NewGrant<'_>) -> Result<GrantId, DbError> {
     conn.execute(
         "INSERT OR IGNORE INTO session_apps (session_id, app_id) VALUES (?1, ?2)",
-        params![session.0, app.0],
+        params![grant.session.0, grant.app.0],
     )?;
     conn.execute(
-        "INSERT INTO grants (session_id, app_id, scope, resource, dpop_jkt, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO grants (session_id, app_id, public_id, scope, resource, dpop_jkt, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
-            session.0,
-            app.0,
-            scope,
-            resource,
-            dpop_jkt,
+            grant.session.0,
+            grant.app.0,
+            grant.public_id,
+            grant.scope,
+            grant.resource,
+            grant.dpop_jkt,
             crate::time::now()
         ],
     )?;
@@ -144,7 +149,7 @@ pub(crate) fn create(
 pub(crate) fn find(conn: &Connection, id: GrantId) -> Result<Option<Grant>, DbError> {
     Ok(conn
         .query_row(
-            "SELECT id, session_id, app_id, scope, resource, generation, dpop_jkt
+            "SELECT id, session_id, app_id, scope, resource, generation, dpop_jkt, public_id
              FROM grants WHERE id = ?1",
             [id.0],
             |row| {
@@ -156,10 +161,23 @@ pub(crate) fn find(conn: &Connection, id: GrantId) -> Result<Option<Grant>, DbEr
                     resource: row.get(4)?,
                     generation: row.get(5)?,
                     dpop_jkt: row.get(6)?,
+                    public_id: row.get(7)?,
                 })
             },
         )
         .optional()?)
+}
+
+/// Whether the grant an access token names still exists.
+pub(crate) fn is_active(conn: &Connection, public_id: &str) -> Result<bool, DbError> {
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM grants WHERE public_id = ?1",
+            [public_id],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
 }
 
 /// Moves a grant to its next generation if it is still at `expected`. Two refreshes racing with

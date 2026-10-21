@@ -327,7 +327,7 @@ async fn issue_code(
                     redirect_uri: &redirect_uri,
                     scope: &scope,
                     nonce: nonce.as_deref(),
-                    code_challenge: &challenge,
+                    code_challenge: challenge.as_deref(),
                     resource: resource.as_deref(),
                     dpop_jkt: dpop_jkt.as_deref(),
                     expires_at,

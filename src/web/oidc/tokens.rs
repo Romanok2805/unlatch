@@ -70,6 +70,10 @@ pub(crate) struct AccessClaims {
     pub(crate) sid: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) cnf: Option<Confirmation>,
+    /// The grant a user's token was issued from: when it is revoked, the token stops working at
+    /// our endpoints at once rather than when it expires.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) grant: Option<String>,
 }
 
 /// The key a token is bound to (RFC 7800), named by its thumbprint (RFC 9449 section 6).
@@ -83,6 +87,8 @@ pub(crate) enum Holder<'a> {
     User {
         subject: String,
         session: &'a ActiveSession,
+        /// The public id of the grant.
+        grant: &'a str,
     },
     /// A service acting for itself with the client credentials grant.
     Client,
@@ -107,13 +113,18 @@ pub(crate) fn access_token(
     access: &Access<'_>,
 ) -> Result<String, CryptoError> {
     let client_id = access.client_id;
-    let (sub, auth_time, sid) = match &access.holder {
-        Holder::User { subject, session } => (
+    let (sub, auth_time, sid, grant) = match &access.holder {
+        Holder::User {
+            subject,
+            session,
+            grant,
+        } => (
             subject.clone(),
             Some(session.auth_time),
             Some(session.public_id.clone()),
+            Some((*grant).to_owned()),
         ),
-        Holder::Client => (client_id.to_owned(), None, None),
+        Holder::Client => (client_id.to_owned(), None, None, None),
     };
     let claims = AccessClaims {
         iss: app.config.issuer.as_str().to_owned(),
@@ -129,6 +140,7 @@ pub(crate) fn access_token(
         cnf: access.dpop.map(|jkt| Confirmation {
             jkt: jkt.to_owned(),
         }),
+        grant,
     };
     // Access tokens are always RS256, which every resource server library understands.
     let key = ring.current(Algorithm::Rs256, now).ok_or(CryptoError)?;
