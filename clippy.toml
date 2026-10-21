@@ -1,0 +1,5 @@
+doc-valid-idents = ["OpenID", ".."]
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true

@@ -1,0 +1,48 @@
+[package]
+name = "unlatch"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.99"
+description = "A small, self-hosted OpenID Connect provider for single sign-on"
+license = "MIT"
+publish = false
+
+[dependencies]
+
+[lints.rust]
+unsafe_code = "forbid"
+rust_2018_idioms = { level = "warn", priority = -1 }
+let_underscore_drop = "warn"
+unreachable_pub = "warn"
+unused_qualifications = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+# Every exception to a lint is local and says why: #[expect(lint, reason = "...")].
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"
+# No panics: see "Ground rules" in docs/architecture.md.
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+indexing_slicing = "deny"
+string_slice = "deny"
+# Overflow and lossy casts must be handled explicitly (checked_*, try_from).
+arithmetic_side_effects = "deny"
+as_conversions = "deny"
+# Output goes through the logger, which redacts secrets.
+print_stdout = "deny"
+print_stderr = "deny"
+dbg_macro = "deny"
+# Only main decides when the process ends.
+exit = "deny"
+mem_forget = "deny"
+
+[profile.release]
+# Small, fast binary; release build time does not matter.
+lto = true
+codegen-units = 1
+strip = true
