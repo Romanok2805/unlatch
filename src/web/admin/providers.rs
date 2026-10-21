@@ -301,49 +301,7 @@ fn form(
         &draft.slug,
         Some(text.slug_note),
     );
-    html!(
-        content,
-        "<div><label for=\"kind\">",
-        { text.kind },
-        "</label><select id=\"kind\" name=\"kind\">"
-    );
-    for kind in [ProviderKind::Oidc, ProviderKind::Github] {
-        html!(content, "<option value=\"", { kind.name() }, "\"");
-        if kind == draft.kind {
-            html!(content, " selected");
-        }
-        html!(content, ">", { kind_label(kind) }, "</option>");
-    }
-    html!(content, "</select></div>");
-    text_input(
-        &mut content,
-        text.issuer,
-        "issuer",
-        &draft.issuer,
-        Some(text.issuer_note),
-    );
-    text_input(
-        &mut content,
-        "Client ID",
-        "client_id",
-        &draft.client_id,
-        None,
-    );
-    html!(
-        content,
-        "<div><label for=\"client_secret\">",
-        { text.client_secret },
-        "</label><input id=\"client_secret\" name=\"client_secret\" type=\"password\" autocomplete=\"off\">"
-    );
-    if existing.is_some() {
-        html!(
-            content,
-            "<p class=\"field-note\">",
-            { text.secret_keep_note },
-            "</p>"
-        );
-    }
-    html!(content, "</div>");
+    connection_fields(&mut content, text, draft, existing.is_some());
     text_input(
         &mut content,
         text.auto_create_domains,
@@ -351,7 +309,14 @@ fn form(
         &draft.domains,
         Some(text.auto_create_note),
     );
-    checkbox(&mut content, text.enabled, "enabled", "1", draft.enabled);
+    checkbox(
+        &mut content,
+        text.enabled,
+        "enabled",
+        "1",
+        draft.enabled,
+        None,
+    );
     html!(
         content,
         "</div></section><section class=\"section\"><span></span><div class=\"stack\"><button class=\"primary\" ",
@@ -363,6 +328,48 @@ fn form(
         callback_section(&mut content, app, admin, provider, &action);
     }
     admin.page(app, Section::Providers, title, &content)
+}
+
+/// What Unlatch needs to reach the provider. A stored secret is never shown; leaving the field
+/// empty keeps it.
+fn connection_fields(out: &mut Html, text: &Text, draft: &Draft, has_secret: bool) {
+    html!(
+        *out,
+        "<div><label for=\"kind\">",
+        { text.kind },
+        "</label><select id=\"kind\" name=\"kind\">"
+    );
+    for kind in [ProviderKind::Oidc, ProviderKind::Github] {
+        html!(*out, "<option value=\"", { kind.name() }, "\"");
+        if kind == draft.kind {
+            html!(*out, " selected");
+        }
+        html!(*out, ">", { kind_label(kind) }, "</option>");
+    }
+    html!(*out, "</select></div>");
+    text_input(
+        out,
+        text.issuer,
+        "issuer",
+        &draft.issuer,
+        Some(text.issuer_note),
+    );
+    text_input(out, "Client ID", "client_id", &draft.client_id, None);
+    html!(
+        *out,
+        "<div><label for=\"client_secret\">",
+        { text.client_secret },
+        "</label><input id=\"client_secret\" name=\"client_secret\" type=\"password\" autocomplete=\"off\">"
+    );
+    if has_secret {
+        html!(
+            *out,
+            "<p class=\"field-note\">",
+            { text.secret_keep_note },
+            "</p>"
+        );
+    }
+    html!(*out, "</div>");
 }
 
 /// Seals a new client secret with the provider's row as context and stores it. An empty secret

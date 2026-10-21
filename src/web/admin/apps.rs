@@ -14,7 +14,7 @@ use crate::store::groups::{self, Group, GroupId};
 use crate::store::users::Username;
 use crate::uri::{InvalidRedirectUri, RedirectUri};
 use crate::web::i18n::Text;
-use crate::web::layout::{Section, copy_button, error_notice, icon};
+use crate::web::layout::{Section, copy_button, error_notice, icon, tooltip};
 use crate::web::{App, Failure};
 
 const MAX_NAME_CHARS: usize = 100;
@@ -256,6 +256,7 @@ fn create_form(
             "public",
             "1",
             checked(request, "public"),
+            None,
         );
     }
     html!(
@@ -599,7 +600,7 @@ fn settings_sections(
         "</h2><div class=\"stack\">"
     );
     text_input(out, text.name, "name", &draft.name, None);
-    checkbox(out, text.enabled, "enabled", "1", draft.enabled);
+    checkbox(out, text.enabled, "enabled", "1", draft.enabled, None);
     html!(*out, "</div></section>");
     match kind {
         Kind::Proxy => {
@@ -617,7 +618,14 @@ fn settings_sections(
         { text.access },
         "</h2><div class=\"stack\">"
     );
-    checkbox(out, text.everyone, "all_users", "1", draft.all_users);
+    checkbox(
+        out,
+        text.everyone,
+        "all_users",
+        "1",
+        draft.all_users,
+        Some(text.tip_everyone),
+    );
     for group in all_groups {
         let id = group.id.0.to_string();
         checkbox(
@@ -626,6 +634,7 @@ fn settings_sections(
             "group",
             &id,
             draft.groups.contains(&group.id),
+            None,
         );
     }
     html!(*out, "</div></section>");
@@ -642,6 +651,7 @@ fn settings_sections(
             "skip_consent",
             "1",
             draft.skip_consent,
+            Some(text.tip_skip_consent),
         );
         html!(*out, "</div></section>");
     }
@@ -677,9 +687,10 @@ fn oidc_fields(out: &mut Html, admin: &Admin, draft: &Draft, confidential: bool)
     );
     html!(
         *out,
-        "<div><label for=\"id_token_alg\">",
+        "<div class=\"has-tip\"><label for=\"id_token_alg\">",
         { text.id_token_alg },
-        "</label><select id=\"id_token_alg\" name=\"id_token_alg\">"
+        "</label><select id=\"id_token_alg\" name=\"id_token_alg\" ",
+        "aria-describedby=\"tip-id_token_alg\">"
     );
     for algorithm in Algorithm::ALL {
         html!(*out, "<option");
@@ -688,7 +699,12 @@ fn oidc_fields(out: &mut Html, admin: &Admin, draft: &Draft, confidential: bool)
         }
         html!(*out, ">", { algorithm.name() }, "</option>");
     }
-    html!(*out, "</select></div>");
+    html!(
+        *out,
+        "</select>",
+        { tooltip("tip-id_token_alg", text.tip_id_token_alg) },
+        "</div>"
+    );
     text_input(
         out,
         text.backchannel_logout_uri,
@@ -696,13 +712,21 @@ fn oidc_fields(out: &mut Html, admin: &Admin, draft: &Draft, confidential: bool)
         &draft.backchannel_logout_uri,
         Some(text.backchannel_logout_note),
     );
-    checkbox(out, text.require_par, "require_par", "1", draft.require_par);
+    checkbox(
+        out,
+        text.require_par,
+        "require_par",
+        "1",
+        draft.require_par,
+        Some(text.tip_require_par),
+    );
     checkbox(
         out,
         text.require_dpop,
         "require_dpop",
         "1",
         draft.require_dpop,
+        Some(text.tip_require_dpop),
     );
     if confidential {
         checkbox(
@@ -711,6 +735,7 @@ fn oidc_fields(out: &mut Html, admin: &Admin, draft: &Draft, confidential: bool)
             "require_pkce",
             "1",
             draft.require_pkce,
+            Some(text.tip_require_pkce),
         );
     }
 }
@@ -736,14 +761,17 @@ fn credentials_section(
     if record.client_secret_hash.is_some() {
         html!(
             *out,
-            "<form method=\"post\" action=\"",
+            "<div class=\"has-tip\"><form method=\"post\" action=\"",
             { action },
             "\">",
             { admin.csrf.field() },
-            "<button class=\"compact\" name=\"action\" value=\"secret\">",
+            "<button class=\"compact\" name=\"action\" value=\"secret\" ",
+            "aria-describedby=\"tip-secret\">",
             { icon("refresh-cw") },
             { text.new_secret },
-            "</button></form>"
+            "</button></form>",
+            { tooltip("tip-secret", text.tip_new_secret) },
+            "</div>"
         );
     } else {
         html!(

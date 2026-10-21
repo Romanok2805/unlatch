@@ -10,7 +10,7 @@ use crate::store::groups::{self, Group, GroupId};
 use crate::store::users::{self, NewUser, User, UserChanges, UserId, Username};
 use crate::time;
 use crate::web::i18n::Text;
-use crate::web::layout::{Section, copy_button, error_notice, icon, success_notice};
+use crate::web::layout::{Section, copy_button, error_notice, icon, success_notice, tooltip};
 use crate::web::session::{self, Ending};
 use crate::web::{App, Failure};
 
@@ -193,6 +193,7 @@ fn create_form(app: &App, request: &Request, admin: &Admin, problem: Option<&str
         "admin",
         "1",
         checked(request, "admin"),
+        Some(text.tip_administrator),
     );
     html!(
         content,
@@ -512,6 +513,7 @@ fn edit_form(
         "email_verified",
         "1",
         draft.email_verified,
+        Some(text.tip_email_verified),
     );
     if !editing_self {
         checkbox(
@@ -520,8 +522,16 @@ fn edit_form(
             "admin",
             "1",
             draft.is_admin,
+            Some(text.tip_administrator),
         );
-        checkbox(&mut content, text.disabled, "disabled", "1", draft.disabled);
+        checkbox(
+            &mut content,
+            text.disabled,
+            "disabled",
+            "1",
+            draft.disabled,
+            Some(text.tip_disabled),
+        );
     }
     html!(
         content,
@@ -537,6 +547,7 @@ fn edit_form(
             "group",
             &id,
             draft.groups.contains(&group.id),
+            None,
         );
     }
     html!(
@@ -567,26 +578,46 @@ fn sign_in_section(out: &mut Html, admin: &Admin, user: &User, action: &str) {
         { text.sign_in_title },
         "</h2><div class=\"stack\">"
     );
-    let mut button = |value: &str, glyph: &str, label: &str| {
+    let mut button = |value: &str, glyph: &str, label: &str, tip: &str| {
+        let id = format!("tip-{value}");
         html!(
             *out,
-            "<form method=\"post\" action=\"",
+            "<div class=\"has-tip\"><form method=\"post\" action=\"",
             { action },
             "\">",
             { admin.csrf.field() },
             "<button class=\"compact\" name=\"action\" value=\"",
             { value },
+            "\" aria-describedby=\"",
+            { id },
             "\">",
             { icon(glyph) },
             { label },
-            "</button></form>"
+            "</button></form>",
+            { tooltip(&id, tip) },
+            "</div>"
         );
     };
-    button("link", "key-round", text.password_link);
+    button(
+        "link",
+        "key-round",
+        text.password_link,
+        text.tip_password_link,
+    );
     if user.totp_secret.is_some() {
-        button("reset_two_factor", "shield-check", text.reset_two_factor);
+        button(
+            "reset_two_factor",
+            "shield-check",
+            text.reset_two_factor,
+            text.tip_reset_two_factor,
+        );
     }
-    button("sign_out", "log-out", text.end_sessions);
+    button(
+        "sign_out",
+        "log-out",
+        text.end_sessions,
+        text.tip_end_sessions,
+    );
     html!(*out, "</div></section>");
 }
 

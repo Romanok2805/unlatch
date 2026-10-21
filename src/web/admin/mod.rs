@@ -15,7 +15,7 @@ use hyper::{Method, StatusCode};
 
 use super::csrf::{self, Csrf};
 use super::i18n::Lang;
-use super::layout::{Frame, Section, admin_page, auth_page, error_notice, success_notice};
+use super::layout::{Frame, Section, admin_page, auth_page, error_notice, success_notice, tooltip};
 use super::signin::verify_code;
 use super::{App, Failure, is_local_path, session};
 use crate::form::encode;
@@ -302,7 +302,19 @@ fn lines_input(out: &mut Html, label: &str, name: &str, lines: &[String], note: 
     );
 }
 
-fn checkbox(out: &mut Html, label: &str, name: &str, value: &str, checked: bool) {
+/// A checkbox with its label, and with `tip`, a hint about what the setting does.
+fn checkbox(
+    out: &mut Html,
+    label: &str,
+    name: &str,
+    value: &str,
+    checked: bool,
+    tip: Option<&str>,
+) {
+    let id = format!("tip-{name}");
+    if tip.is_some() {
+        html!(*out, "<div class=\"has-tip\">");
+    }
     html!(
         *out,
         "<label class=\"check\"><input type=\"checkbox\" name=\"",
@@ -311,10 +323,16 @@ fn checkbox(out: &mut Html, label: &str, name: &str, value: &str, checked: bool)
         { value },
         "\""
     );
+    if tip.is_some() {
+        html!(*out, " aria-describedby=\"", { id }, "\"");
+    }
     if checked {
         html!(*out, " checked");
     }
     html!(*out, ">", { label }, "</label>");
+    if let Some(tip) = tip {
+        html!(*out, { tooltip(&id, tip) }, "</div>");
+    }
 }
 
 /// The non-empty lines of a text area, trimmed.

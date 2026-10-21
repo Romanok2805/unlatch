@@ -14,12 +14,27 @@ for (const button of document.querySelectorAll("button.reveal")) {
 }
 
 for (const button of document.querySelectorAll("button[data-copy]")) {
+  const label = button.querySelector(".tip");
   button.hidden = false;
   button.addEventListener("click", async () => {
     await navigator.clipboard.writeText(button.dataset.copy);
     button.classList.add("copied");
-    setTimeout(() => button.classList.remove("copied"), 1500);
+    label.textContent = button.dataset.copied;
+    setTimeout(() => {
+      button.classList.remove("copied");
+      label.textContent = button.getAttribute("aria-label");
+    }, 1500);
   });
+}
+
+// Escape hides the hints until the pointer or the focus moves on.
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    document.documentElement.classList.add("hide-tips");
+  }
+});
+for (const type of ["pointerover", "focusin"]) {
+  document.addEventListener(type, () => document.documentElement.classList.remove("hide-tips"));
 }
 
 // Six digits are a complete code, so there is nothing left to press.

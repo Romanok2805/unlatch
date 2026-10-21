@@ -2,7 +2,7 @@
 
 use super::csrf::{self, Csrf};
 use super::i18n::{Lang, Text};
-use super::layout::{auth_page, error_notice, icon, success_notice};
+use super::layout::{auth_page, error_notice, icon, success_notice, tooltip};
 use super::session_table::describe_device;
 use super::signin::{check_password, hash_password, recovery_code_hash, totp_context, verify_code};
 use super::{App, Failure, qr, session};
@@ -472,9 +472,12 @@ async fn manage_page(
         { text.code },
         "</label><input id=\"code\" name=\"code\" class=\"code-input\" inputmode=\"numeric\" ",
         "autocomplete=\"one-time-code\" maxlength=\"7\" required></div>",
-        "<button class=\"primary block\" name=\"action\" value=\"codes\">",
+        "<div class=\"has-tip\"><button class=\"primary block\" name=\"action\" value=\"codes\" ",
+        "aria-describedby=\"tip-codes\">",
         { text.new_recovery_codes },
-        "</button>"
+        "</button>",
+        { tooltip("tip-codes", text.tip_new_recovery_codes) },
+        "</div>"
     );
     if session.user.is_admin {
         html!(
@@ -486,9 +489,12 @@ async fn manage_page(
     } else {
         html!(
             content,
-            "<button class=\"block danger\" name=\"action\" value=\"off\">",
+            "<div class=\"has-tip\"><button class=\"block danger\" name=\"action\" value=\"off\" ",
+            "aria-describedby=\"tip-off\">",
             { text.turn_off },
-            "</button>"
+            "</button>",
+            { tooltip("tip-off", text.tip_turn_off) },
+            "</div>"
         );
     }
     html!(

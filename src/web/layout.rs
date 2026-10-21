@@ -24,6 +24,36 @@ pub(crate) fn icon(name: &str) -> Html {
     out
 }
 
+/// A short hint for a control, shown above it while the pointer rests on it or it has keyboard
+/// focus, and on touch screens while it is touched. It goes next to the control, inside an element
+/// with the class `has-tip`, and the control names `id` in `aria-describedby`. Inside the control
+/// it would become part of the control's name.
+pub(crate) fn tooltip(id: &str, text: &str) -> Html {
+    let mut out = Html::new();
+    html!(
+        out,
+        "<span class=\"tip\" role=\"tooltip\" id=\"",
+        { id },
+        "\">",
+        { text },
+        "</span>"
+    );
+    out
+}
+
+/// Shows sighted users the label of a button that has only an icon. Screen readers already get
+/// the label from `aria-label`, so this copy is hidden from them.
+fn icon_label(text: &str) -> Html {
+    let mut out = Html::new();
+    html!(
+        out,
+        "<span class=\"tip end\" aria-hidden=\"true\">",
+        { text },
+        "</span>"
+    );
+    out
+}
+
 /// A page with one narrow column: the instance name above the content and the language switch
 /// below it. Sign-in, consent and error pages use it.
 pub(crate) fn auth_page(
@@ -156,10 +186,11 @@ pub(crate) fn admin_page(app: &App, frame: &Frame<'_>, content: &Html) -> Html {
         { frame.username },
         "</span></a><form method=\"post\" action=\"/logout\">",
         { frame.csrf.field() },
-        "<button class=\"quiet\" aria-label=\"",
+        "<button class=\"quiet has-tip\" aria-label=\"",
         { text.sign_out },
         "\">",
         { icon("log-out") },
+        { icon_label(text.sign_out) },
         "</button></form></div></aside><main class=\"content\">",
         { content },
         "</main></div></body></html>"
@@ -172,26 +203,32 @@ pub(crate) fn reveal_button(lang: Lang) -> Html {
     let mut out = Html::new();
     html!(
         out,
-        "<button type=\"button\" class=\"reveal quiet\" aria-label=\"",
+        "<button type=\"button\" class=\"reveal quiet has-tip\" aria-label=\"",
         { lang.text().show_password },
         "\" aria-pressed=\"false\" hidden>",
         { icon("eye") },
+        { icon_label(lang.text().show_password) },
         "</button>"
     );
     out
 }
 
-/// A button that copies `value`. Hidden until the script runs.
+/// A button that copies `value`. Hidden until the script runs, which also says "Copied" in its
+/// label for a moment.
 pub(crate) fn copy_button(lang: Lang, value: &str) -> Html {
+    let text = lang.text();
     let mut out = Html::new();
     html!(
         out,
-        "<button type=\"button\" class=\"quiet\" data-copy=\"",
+        "<button type=\"button\" class=\"quiet has-tip\" data-copy=\"",
         { value },
+        "\" data-copied=\"",
+        { text.copied },
         "\" aria-label=\"",
-        { lang.text().copy },
+        { text.copy },
         "\" hidden>",
         { icon("copy") },
+        { icon_label(text.copy) },
         "</button>"
     );
     out
