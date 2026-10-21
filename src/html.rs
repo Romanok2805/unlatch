@@ -88,7 +88,7 @@ macro_rules! render_display {
     )*};
 }
 
-render_display!(u8, u16, u32, u64, usize, i64);
+render_display!(u8, u16, u32, u64, usize, i32, i64);
 
 /// Appends parts to an [`Html`]: string literals as markup, `{expression}` as escaped text.
 ///

@@ -82,6 +82,32 @@ fn language_switch(page: &mut Html, lang: Lang, back: &str) {
     );
 }
 
+pub(crate) fn error_notice(text: &str) -> Html {
+    let mut out = Html::new();
+    html!(
+        out,
+        "<div class=\"notice error\" role=\"alert\">",
+        { icon("circle-alert") },
+        "<span>",
+        { text },
+        "</span></div>"
+    );
+    out
+}
+
+pub(crate) fn success_notice(text: &str) -> Html {
+    let mut out = Html::new();
+    html!(
+        out,
+        "<div class=\"notice success\" role=\"status\">",
+        { icon("circle-check") },
+        "<span>",
+        { text },
+        "</span></div>"
+    );
+    out
+}
+
 pub(crate) fn error_page(app: &App, request: &Request, status: StatusCode) -> Response {
     let lang = Lang::of(request);
     let text = lang.text();

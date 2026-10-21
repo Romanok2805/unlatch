@@ -370,6 +370,10 @@ button:hover,
   margin-top: 1.75rem;
 }
 
+.auth .notice {
+  margin-top: 1.25rem;
+}
+
 .auth .alternatives {
   display: flex;
   flex-direction: column;
@@ -398,14 +402,14 @@ button:hover,
   color: var(--text-3);
 }
 
-.scopes {
+.rows {
   margin: 1.5rem 0;
   padding: 0;
   border-top: 1px solid var(--line);
   list-style: none;
 }
 
-.scopes li {
+.rows li {
   display: flex;
   align-items: center;
   gap: 0.75rem;
@@ -413,8 +417,56 @@ button:hover,
   border-bottom: 1px solid var(--line);
 }
 
-.scopes .icon {
+.rows .icon {
   color: var(--text-2);
+}
+
+.rows li > :last-child {
+  margin-left: auto;
+}
+
+/* Scanners need dark modules on a light background, in either theme. */
+.qr {
+  display: block;
+  width: 13rem;
+  height: 13rem;
+  margin: 1.5rem 0;
+  border-radius: var(--radius);
+  background: #ffffff;
+  shape-rendering: crispEdges;
+}
+
+.qr path {
+  fill: #000000;
+}
+
+details {
+  margin-bottom: 1.5rem;
+  color: var(--text-2);
+  font-size: 0.875rem;
+}
+
+summary {
+  cursor: pointer;
+}
+
+details code {
+  display: block;
+  margin-top: 0.5rem;
+  color: var(--text);
+  font-size: 0.9375rem;
+  letter-spacing: 0.05em;
+  overflow-wrap: anywhere;
+}
+
+.codes {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem 1.5rem;
+  margin: 1.5rem 0;
+  padding: 0;
+  font-family: var(--mono);
+  list-style: none;
 }
 
 .actions {

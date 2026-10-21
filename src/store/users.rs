@@ -3,6 +3,7 @@
 use rusqlite::{Connection, OptionalExtension as _, Row, params};
 
 use super::DbError;
+use crate::crypto::TokenHash;
 use crate::crypto::password::PasswordHash;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,10 +46,12 @@ pub(crate) struct User {
     pub(crate) disabled: bool,
 }
 
-const COLUMNS: &str = "id, username, display_name, email, email_verified, password_hash, \
-                       totp_secret, totp_last_step, is_admin, disabled";
+/// The columns `from_row` reads, first in a query and qualified so they work in joins.
+pub(crate) const COLUMNS: &str = "users.id, users.username, users.display_name, \
+    users.email, users.email_verified, users.password_hash, users.totp_secret, \
+    users.totp_last_step, users.is_admin, users.disabled";
 
-fn from_row(row: &Row<'_>) -> rusqlite::Result<User> {
+pub(crate) fn from_row(row: &Row<'_>) -> rusqlite::Result<User> {
     Ok(User {
         id: UserId(row.get(0)?),
         username: row.get(1)?,
@@ -120,6 +123,106 @@ pub(crate) fn set_password(
         "UPDATE users SET password_hash = ?2 WHERE id = ?1",
         params![id.0, hash.as_str()],
     )?;
+    Ok(())
+}
+
+/// Stores a new TOTP seed, sealed, or removes it with `None`. Recovery codes go with it.
+pub(crate) fn set_totp(
+    conn: &Connection,
+    id: UserId,
+    sealed_secret: Option<&[u8]>,
+) -> Result<(), DbError> {
+    conn.execute(
+        "UPDATE users SET totp_secret = ?2, totp_last_step = NULL WHERE id = ?1",
+        params![id.0, sealed_secret],
+    )?;
+    if sealed_secret.is_none() {
+        conn.execute("DELETE FROM recovery_codes WHERE user_id = ?1", [id.0])?;
+    }
+    Ok(())
+}
+
+/// Records the time step of an accepted code, unless it isn't newer than the last one. Doing
+/// both in one statement means two requests racing with the same code can't both succeed.
+pub(crate) fn accept_totp_step(conn: &Connection, id: UserId, step: i64) -> Result<bool, DbError> {
+    let changed = conn.execute(
+        "UPDATE users SET totp_last_step = ?2
+         WHERE id = ?1 AND (totp_last_step IS NULL OR totp_last_step < ?2)",
+        params![id.0, step],
+    )?;
+    Ok(changed == 1)
+}
+
+pub(crate) fn replace_recovery_codes(
+    conn: &mut Connection,
+    id: UserId,
+    hashes: &[[u8; 32]],
+) -> Result<(), DbError> {
+    let tx = conn.transaction()?;
+    tx.execute("DELETE FROM recovery_codes WHERE user_id = ?1", [id.0])?;
+    for hash in hashes {
+        tx.execute(
+            "INSERT INTO recovery_codes (user_id, code_hash) VALUES (?1, ?2)",
+            params![id.0, hash],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Uses up a recovery code. Returns whether it existed.
+pub(crate) fn use_recovery_code(
+    conn: &Connection,
+    id: UserId,
+    hash: &[u8; 32],
+) -> Result<bool, DbError> {
+    let deleted = conn.execute(
+        "DELETE FROM recovery_codes WHERE user_id = ?1 AND code_hash = ?2",
+        params![id.0, hash],
+    )?;
+    Ok(deleted == 1)
+}
+
+pub(crate) fn recovery_code_count(conn: &Connection, id: UserId) -> Result<i64, DbError> {
+    Ok(conn.query_row(
+        "SELECT count(*) FROM recovery_codes WHERE user_id = ?1",
+        [id.0],
+        |row| row.get(0),
+    )?)
+}
+
+/// Creates a one-time link to set a password, replacing any earlier link of the user.
+pub(crate) fn create_password_link(
+    conn: &Connection,
+    id: UserId,
+    token_hash: &TokenHash,
+    expires_at: i64,
+) -> Result<(), DbError> {
+    conn.execute("DELETE FROM password_links WHERE user_id = ?1", [id.0])?;
+    conn.execute(
+        "INSERT INTO password_links (token_hash, user_id, expires_at) VALUES (?1, ?2, ?3)",
+        params![token_hash.0, id.0, expires_at],
+    )?;
+    Ok(())
+}
+
+/// The user a password link belongs to, if it exists and hasn't expired.
+pub(crate) fn password_link_user(
+    conn: &Connection,
+    token_hash: &TokenHash,
+    now: i64,
+) -> Result<Option<UserId>, DbError> {
+    Ok(conn
+        .query_row(
+            "SELECT user_id FROM password_links WHERE token_hash = ?1 AND expires_at > ?2",
+            params![token_hash.0, now],
+            |row| row.get(0).map(UserId),
+        )
+        .optional()?)
+}
+
+pub(crate) fn delete_password_links(conn: &Connection, id: UserId) -> Result<(), DbError> {
+    conn.execute("DELETE FROM password_links WHERE user_id = ?1", [id.0])?;
     Ok(())
 }
 

@@ -21,10 +21,11 @@ mod web;
 use std::io::Write as _;
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::config::Config;
 use crate::crypto::MasterKey;
-use crate::log::{error, info};
+use crate::log::{error, info, warning};
 use crate::store::Db;
 use crate::web::App;
 
@@ -96,6 +97,10 @@ async fn run(config: Config) -> Result<(), String> {
     let db = Db::open(&config.database).map_err(|e| e.to_string())?;
     let listener = http::bind(config.listen).await.map_err(|e| e.to_string())?;
     let app = Arc::new(App::new(config, db).await.map_err(|e| e.to_string())?);
+    if let Some(link) = web::setup::prepare(&app).await.map_err(|e| e.to_string())? {
+        warning!("there are no accounts yet; create the first administrator at {link}");
+    }
+    tokio::spawn(housekeeping(Arc::clone(&app)));
     info!(
         "listening on {} as {}",
         app.config.listen,
@@ -103,4 +108,23 @@ async fn run(config: Config) -> Result<(), String> {
     );
     http::serve(app, listener).await;
     Ok(())
+}
+
+/// Audit entries are kept this long; they contain IP addresses, which are personal data.
+const AUDIT_RETENTION: i64 = 180 * 24 * 60 * 60;
+
+/// Deletes expired sessions, codes and links, and old audit entries, once an hour.
+async fn housekeeping(app: Arc<App>) {
+    let mut hourly = tokio::time::interval(Duration::from_hours(1));
+    loop {
+        hourly.tick().await;
+        let now = time::now();
+        let result = app
+            .db
+            .run(move |conn| store::delete_expired(conn, now, AUDIT_RETENTION))
+            .await;
+        if let Err(e) = result {
+            error!("deleting expired data failed: {e}");
+        }
+    }
 }

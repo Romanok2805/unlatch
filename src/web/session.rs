@@ -1,0 +1,132 @@
+//! Browser sessions: the cookie, finding the session it belongs to, starting and ending one.
+
+use super::signin::SignedIn;
+use super::{App, Failure, csrf};
+use crate::crypto::{TokenHash, random_bytes, random_token};
+use crate::encoding::base64url;
+use crate::form::encode;
+use crate::http::cookie::{self, SameSite, SetCookie};
+use crate::http::{Request, Response};
+use crate::store::sessions::{self, ActiveSession, NewSession};
+use crate::time;
+
+const COOKIE: &str = "session";
+/// A session ends after a week without use, and a month after sign-in in any case.
+const IDLE_LIFETIME: i64 = 7 * 24 * 60 * 60;
+const MAX_LIFETIME: i64 = 30 * 24 * 60 * 60;
+/// Activity is written at most this often, not on every request.
+const TOUCH_INTERVAL: i64 = 60 * 60;
+
+fn cookie_name(app: &App) -> String {
+    cookie::name(COOKIE, app.config.issuer.is_secure())
+}
+
+/// The session of the browser that sent the request, if it has a valid one.
+pub(crate) async fn current(
+    app: &App,
+    request: &Request,
+) -> Result<Option<ActiveSession>, Failure> {
+    let Some(token) = request.cookie(&cookie_name(app)) else {
+        return Ok(None);
+    };
+    let hash = TokenHash::of(token);
+    let now = time::now();
+    let Some(session) = app
+        .db
+        .run(move |conn| sessions::find(conn, &hash, now))
+        .await?
+    else {
+        return Ok(None);
+    };
+    if now.saturating_sub(session.last_seen_at) >= TOUCH_INTERVAL {
+        let id = session.id;
+        let expires_at = now
+            .saturating_add(IDLE_LIFETIME)
+            .min(session.auth_time.saturating_add(MAX_LIFETIME));
+        app.db
+            .run(move |conn| sessions::touch(conn, id, now, expires_at))
+            .await?;
+    }
+    Ok(Some(session))
+}
+
+/// A redirect to the sign-in page that comes back to this page afterwards.
+pub(crate) fn to_sign_in(request: &Request) -> Response {
+    Response::redirect(format!("/login?next={}", encode(&request.target)))
+}
+
+/// Starts a session for someone who has just signed in, replacing the session the browser had.
+/// A new token every time means a token planted in the browser beforehand is worthless.
+pub(crate) async fn start(
+    app: &App,
+    request: &Request,
+    signed_in: SignedIn,
+    response: Response,
+) -> Result<Response, Failure> {
+    let token = random_token()?;
+    let public_id = base64url(&random_bytes::<16>()?);
+    let previous = request.cookie(&cookie_name(app)).map(TokenHash::of);
+    let token_hash = TokenHash::of(&token);
+    let now = time::now();
+    let ip = request.client_ip.to_string();
+    let user_agent: String = request
+        .header("user-agent")
+        .unwrap_or_default()
+        .chars()
+        .take(200)
+        .collect();
+    let user_id = signed_in.user();
+    let amr = signed_in.amr();
+    app.db
+        .run(move |conn| {
+            if let Some(previous) = previous {
+                conn.execute("DELETE FROM sessions WHERE token_hash = ?1", [previous.0])?;
+            }
+            sessions::create(
+                conn,
+                &NewSession {
+                    token_hash,
+                    public_id: &public_id,
+                    user_id,
+                    amr,
+                    now,
+                    expires_at: now.saturating_add(IDLE_LIFETIME),
+                    ip: &ip,
+                    user_agent: &user_agent,
+                },
+            )
+        })
+        .await?;
+    let secure = app.config.issuer.is_secure();
+    let cookie = SetCookie {
+        name: &cookie_name(app),
+        value: &token,
+        max_age: Some(MAX_LIFETIME),
+        same_site: SameSite::Lax,
+    };
+    Ok(response.cookie(&cookie, secure))
+}
+
+/// A cookie that deletes the session cookie in the browser.
+pub(crate) fn clear(app: &App, response: Response) -> Response {
+    let secure = app.config.issuer.is_secure();
+    let cookie = SetCookie {
+        name: &cookie_name(app),
+        value: "",
+        max_age: Some(0),
+        same_site: SameSite::Lax,
+    };
+    response.cookie(&cookie, secure)
+}
+
+/// `POST /logout`: ends the session in this browser.
+pub(crate) async fn sign_out(app: &App, request: &Request) -> Result<Response, Failure> {
+    if !csrf::verify(app, request) {
+        return Ok(Response::redirect("/account"));
+    }
+    if let Some(session) = current(app, request).await? {
+        let id = session.id;
+        app.db.run(move |conn| sessions::delete(conn, id)).await?;
+    }
+    Ok(clear(app, Response::redirect("/login")))
+}

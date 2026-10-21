@@ -5,6 +5,7 @@
 //! transaction.
 
 pub(crate) mod audit;
+pub(crate) mod sessions;
 pub(crate) mod settings;
 pub(crate) mod users;
 
@@ -108,6 +109,23 @@ impl Db {
         self.jobs.send(job).await.map_err(|_| DbError::Closed)?;
         result.await.map_err(|_| DbError::Closed)?
     }
+}
+
+/// Removes what has expired: sessions with everything issued from them, codes, links, and audit
+/// entries past their retention. Runs every hour.
+pub(crate) fn delete_expired(
+    conn: &Connection,
+    now: i64,
+    audit_retention: i64,
+) -> Result<(), DbError> {
+    conn.execute("DELETE FROM sessions WHERE expires_at <= ?1", [now])?;
+    conn.execute("DELETE FROM codes WHERE expires_at <= ?1", [now])?;
+    conn.execute("DELETE FROM password_links WHERE expires_at <= ?1", [now])?;
+    conn.execute(
+        "DELETE FROM audit_log WHERE at < ?1",
+        [now.saturating_sub(audit_retention)],
+    )?;
+    Ok(())
 }
 
 /// The database holds password hashes and sealed secrets, so only its owner may read it. SQLite
