@@ -78,6 +78,7 @@ struct Identity {
     email: Option<String>,
     email_verified: bool,
     name: Option<String>,
+    hosted_domain: Option<String>,
 }
 
 fn callback_url(app: &App, provider: &Provider) -> String {
@@ -144,7 +145,10 @@ pub(crate) async fn manage(app: &App, request: &Request) -> Result<Response, Fai
         .db
         .run(move |conn| providers::by_slug(conn, &slug))
         .await?;
-    let (Some(provider), true) = (provider, csrf::verify(app, request)) else {
+    let (Some(provider), true) = (
+        provider.filter(|provider| provider.enabled),
+        csrf::verify(app, request),
+    ) else {
         return Ok(Response::redirect("/account"));
     };
     if request.form.single("action").ok().flatten() == Some("unlink") {
@@ -253,6 +257,9 @@ pub(crate) async fn callback(
     else {
         return Ok(None);
     };
+    if !provider.enabled {
+        return Ok(None);
+    }
     let query = |name| request.query.single(name).ok().flatten();
     let flow = read_flow(app, request).filter(|flow| {
         flow.provider == provider.id.0
@@ -409,6 +416,8 @@ struct IdClaims {
     email: Option<String>,
     email_verified: Option<Flag>,
     name: Option<String>,
+    /// Google's hosted domain: set only for accounts of a Google Workspace organisation.
+    hd: Option<String>,
 }
 
 /// Redeems the code and checks the ID token as OpenID Connect Core section 3.1.3.7 requires.
@@ -482,6 +491,7 @@ async fn oidc_identity(
         email: claims.email,
         email_verified,
         name: claims.name,
+        hosted_domain: claims.hd,
     })
 }
 
@@ -530,6 +540,7 @@ async fn github_identity(app: &App, provider: &Provider, code: &str) -> Result<I
         email_verified: primary.is_some(),
         email: primary.map(|email| email.email),
         name: user.name.or(Some(user.login)),
+        hosted_domain: None,
     })
 }
 
@@ -604,6 +615,12 @@ async fn create_account(
     };
     let domain = domain.to_ascii_lowercase();
     if !provider.auto_create_domains.contains(&domain) {
+        return Ok(None);
+    }
+    // A personal Google account can carry a verified address of a company domain, for example
+    // one kept after leaving. Only an account of the company's Workspace has `hd` set to it.
+    let google = provider.issuer.as_deref() == Some("https://accounts.google.com");
+    if google && identity.hosted_domain.as_deref() != Some(domain.as_str()) {
         return Ok(None);
     }
     let base: String = local
@@ -706,7 +723,7 @@ async fn record(
 
 /// A sign-in with the provider failed; the reason goes to the log, not to the page.
 fn failed(app: &App, request: &Request, provider: &Provider, reason: &str) -> Response {
-    warning!("sign-in with {} failed: {reason}", provider.name);
+    warning!("sign-in with {} failed: {reason:?}", provider.name);
     message(app, request, Lang::of(request).text().provider_failed).status(StatusCode::BAD_GATEWAY)
 }
 

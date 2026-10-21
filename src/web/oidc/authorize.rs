@@ -140,6 +140,16 @@ fn open(app: &App, request: &Request) -> Option<AuthRequest> {
     AuthRequest::open(&sealed, &app.keys.requests)
 }
 
+/// The client of a sealed request, if it still accepts the request.
+async fn client_of(app: &App, auth: &AuthRequest) -> Result<Option<AppRecord>, Failure> {
+    let client_id = auth.client_id.clone();
+    let client = app
+        .db
+        .run(move |conn| apps::by_client_id(conn, &client_id))
+        .await?;
+    Ok(client.filter(|client| auth.fits(client)))
+}
+
 /// What is still needed before a code can be issued.
 enum Next {
     SignIn { force: bool },
@@ -184,7 +194,11 @@ async fn next_step(
         auth.scopes()
             .all(|scope| granted.split(' ').any(|g| g == scope))
     });
-    if auth.prompt.consent || !(client.skip_consent || covered) {
+    // Any program on the user's device can claim the redirect URI of a native app, and without a
+    // secret it can't be told apart, so the user is always asked (RFC 8252, section 8.6).
+    let impersonable =
+        client.client_secret_hash.is_none() && !auth.redirect_uri.starts_with("https://");
+    if auth.prompt.consent || impersonable || !(client.skip_consent || covered) {
         return Ok(Next::Consent(session));
     }
     Ok(Next::Code(session))
@@ -195,12 +209,7 @@ pub(crate) async fn resume(app: &App, request: &Request) -> Result<Response, Fai
     let Some(auth) = open(app, request) else {
         return Ok(expired(app, request));
     };
-    let client_id = auth.client_id.clone();
-    let Some(client) = app
-        .db
-        .run(move |conn| apps::by_client_id(conn, &client_id))
-        .await?
-    else {
+    let Some(client) = client_of(app, &auth).await? else {
         return Ok(expired(app, request));
     };
     if !client.enabled {
@@ -261,17 +270,13 @@ pub(crate) async fn decide(app: &App, request: &Request) -> Result<Response, Fai
             &auth.seal(&app.keys.requests)?,
         )));
     }
-    let client_id = auth.client_id.clone();
-    let Some(client) = app
-        .db
-        .run(move |conn| apps::by_client_id(conn, &client_id))
-        .await?
-    else {
+    let Some(client) = client_of(app, &auth).await? else {
         return Ok(expired(app, request));
     };
     let session = match next_step(app, request, &auth, &client).await? {
-        Next::Consent(session) | Next::Code(session) => session,
-        Next::SignIn { .. } | Next::NoAccess(_) => {
+        Next::Consent(session) | Next::Code(session) if client.enabled => session,
+        // Anything else is answered where the request continues.
+        _ => {
             return Ok(Response::redirect(continue_url(
                 &auth.seal(&app.keys.requests)?,
             )));

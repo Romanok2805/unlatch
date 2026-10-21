@@ -10,8 +10,9 @@ use crate::form::Form;
 use crate::store::apps::{self, AppRecord, Kind};
 use crate::time;
 
-const MAX_STATE_LEN: usize = 2000;
-const MAX_NONCE_LEN: usize = 500;
+/// State and nonce travel inside sealed cookies, which browsers cap at 4 KB.
+const MAX_STATE_LEN: usize = 512;
+const MAX_NONCE_LEN: usize = 256;
 const MAX_LOGIN_HINT_LEN: usize = 100;
 /// The parameters of an authorization request. OAuth forbids repeating any of them.
 const PARAMETERS: [&str; 15] = [
@@ -75,6 +76,25 @@ impl AuthRequest {
     pub(crate) fn scopes(&self) -> impl Iterator<Item = &str> {
         self.scope.split(' ').filter(|scope| !scope.is_empty())
     }
+
+    /// Whether the client still accepts this request as it is registered now: an administrator
+    /// may have removed the redirect URI or resource since the request was checked.
+    pub(crate) fn fits(&self, client: &AppRecord) -> bool {
+        accepts(client, &self.redirect_uri)
+            && self
+                .resource
+                .as_ref()
+                .is_none_or(|resource| client.resources.contains(resource))
+    }
+}
+
+/// Whether `redirect_uri` is registered for the client.
+fn accepts(client: &AppRecord, redirect_uri: &str) -> bool {
+    client.kind == Kind::Oidc
+        && client
+            .redirect_uris
+            .iter()
+            .any(|uri| uri.matches(redirect_uri))
 }
 
 /// Why a request was refused.
@@ -108,13 +128,7 @@ pub(crate) async fn check(
         .db
         .run(move |conn| apps::by_client_id(conn, &lookup))
         .await?;
-    let Some(client) = client.filter(|client| {
-        client.kind == Kind::Oidc
-            && client
-                .redirect_uris
-                .iter()
-                .any(|uri| uri.matches(redirect_uri))
-    }) else {
+    let Some(client) = client.filter(|client| accepts(client, redirect_uri)) else {
         return Ok(Err(Rejection::Page));
     };
 

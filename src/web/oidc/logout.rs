@@ -33,7 +33,7 @@ pub(crate) async fn end_session(app: &App, request: &Request) -> Result<Response
     let value = |name| params.single(name).ok().flatten();
     // An expired ID token is still a valid hint, so only the signature and issuer are checked.
     let hint = value("id_token_hint")
-        .and_then(|token| verify_jwt(token, &app.key_ring().verifying_keys(), None).ok())
+        .and_then(|token| verify_jwt(token, &app.key_ring().verifying_keys(), Some("JWT")).ok())
         .and_then(|payload| serde_json::from_slice::<Hint>(&payload).ok())
         .filter(|hint| hint.iss == app.config.issuer.as_str());
     let client_id = match (

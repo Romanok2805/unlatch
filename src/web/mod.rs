@@ -68,6 +68,8 @@ pub(crate) struct Keys {
     pub(crate) signing: SealingKey,
     /// Derives the `sub` of users.
     pub(crate) subject: MacKey,
+    /// Hashes recovery codes.
+    pub(crate) recovery: MacKey,
 }
 
 impl Keys {
@@ -82,6 +84,7 @@ impl Keys {
             refresh: master.sealing_key("refresh tokens")?,
             signing: master.sealing_key("signing keys")?,
             subject: master.mac_key("subject")?,
+            recovery: master.mac_key("recovery codes")?,
         })
     }
 }

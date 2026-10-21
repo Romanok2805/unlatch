@@ -199,18 +199,16 @@ async fn verify(app: &App, request: &Request) -> Result<Response, Failure> {
         let limits = &app.limits;
         if !csrf::verify(app, request) {
             problem = Some(text.form_expired);
-        } else if !limits.code_per_quarter_hour.allows(&key) || !limits.code_per_day.allows(&key) {
+        } else if !limits.code_attempt(&key) {
             problem = Some(text.too_many_attempts);
         } else if verify_code(app, &session.user, code).await? {
             let (id, now) = (session.id, time::now());
             app.db
                 .run(move |conn| sessions::mark_verified(conn, id, now))
                 .await?;
-            limits.code_per_quarter_hour.reset(&key);
+            limits.code_succeeded(&key);
             return Ok(Response::redirect(next));
         } else {
-            limits.code_per_quarter_hour.fail(&key);
-            limits.code_per_day.fail(&key);
             problem = Some(text.wrong_code);
         }
     }

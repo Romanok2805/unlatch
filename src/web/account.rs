@@ -324,13 +324,17 @@ pub(super) async fn password_submit(app: &App, request: &Request) -> Result<Resp
     }
     let field = |name| request.form.single(name).ok().flatten().unwrap_or_default();
     let user = &session.user;
-    if !app.limits.password_by_account.allows(&user.username) {
+    if !app
+        .limits
+        .password_attempt(request.client_ip, &user.username)
+    {
         return password_form(app, request, Some(text.too_many_attempts), false);
     }
     if !check_password(app, field("current"), user.password_hash.clone()).await? {
-        app.limits.password_by_account.fail(&user.username);
         return password_form(app, request, Some(text.wrong_password), false);
     }
+    app.limits
+        .password_succeeded(request.client_ip, &user.username);
     if let Some(problem) = password_problem(text, &user.username, field("new"), field("repeat")) {
         return password_form(app, request, Some(problem), false);
     }
@@ -522,7 +526,7 @@ pub(super) async fn two_factor_submit(app: &App, request: &Request) -> Result<Re
     let limits = &app.limits;
     let problem = if !csrf::verify(app, request) {
         Some(text.form_expired)
-    } else if !limits.code_per_quarter_hour.allows(&key) || !limits.code_per_day.allows(&key) {
+    } else if !limits.code_attempt(&key) {
         Some(text.too_many_attempts)
     } else {
         None
@@ -544,8 +548,6 @@ pub(super) async fn two_factor_submit(app: &App, request: &Request) -> Result<Re
         }
         let now = u64::try_from(time::now()).unwrap_or(0);
         let Some(step) = totp::verify(secret.expose(), code, now, None) else {
-            limits.code_per_quarter_hour.fail(&key);
-            limits.code_per_day.fail(&key);
             return enrol_page(
                 app,
                 request,
@@ -554,6 +556,7 @@ pub(super) async fn two_factor_submit(app: &App, request: &Request) -> Result<Re
                 Some(text.wrong_code),
             );
         };
+        limits.code_succeeded(&key);
         let sealed = app
             .keys
             .secrets
@@ -575,10 +578,9 @@ pub(super) async fn two_factor_submit(app: &App, request: &Request) -> Result<Re
         return manage_page(app, request, &session, Some(problem)).await;
     }
     if !verify_code(app, user, code).await? {
-        limits.code_per_quarter_hour.fail(&key);
-        limits.code_per_day.fail(&key);
         return manage_page(app, request, &session, Some(text.wrong_code)).await;
     }
+    limits.code_succeeded(&key);
     match action {
         "codes" => new_recovery_codes(app, request, &session).await,
         "off" if !user.is_admin => {
@@ -633,8 +635,11 @@ async fn new_recovery_codes(
         let (first, second) = symbols.split_at_checked(5).unwrap_or((&symbols, ""));
         codes.push(format!("{first}-{second}"));
     }
-    let hashes: Vec<[u8; 32]> = codes.iter().map(|code| recovery_code_hash(code)).collect();
     let id = session.user.id;
+    let hashes: Vec<[u8; 32]> = codes
+        .iter()
+        .map(|code| recovery_code_hash(app, id, code))
+        .collect();
     app.db
         .run(move |conn| users::replace_recovery_codes(conn, id, &hashes))
         .await?;

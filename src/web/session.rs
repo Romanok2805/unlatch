@@ -65,9 +65,11 @@ pub(crate) async fn start(
     signed_in: SignedIn,
     response: Response,
 ) -> Result<Response, Failure> {
+    if let Some(previous) = current(app, request).await? {
+        end(app, Ending::One(previous.id)).await?;
+    }
     let token = random_token()?;
     let public_id = base64url(&random_bytes::<16>()?);
-    let previous = request.cookie(&cookie_name(app)).map(TokenHash::of);
     let token_hash = TokenHash::of(&token);
     let now = time::now();
     let ip = request.client_ip.to_string();
@@ -81,9 +83,6 @@ pub(crate) async fn start(
     let amr = signed_in.amr();
     app.db
         .run(move |conn| {
-            if let Some(previous) = previous {
-                conn.execute("DELETE FROM sessions WHERE token_hash = ?1", [previous.0])?;
-            }
             sessions::create(
                 conn,
                 &NewSession {

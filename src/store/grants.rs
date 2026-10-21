@@ -22,7 +22,13 @@ pub(crate) struct NewCode<'a> {
     pub(crate) expires_at: i64,
 }
 
+/// Stores a code. Unredeemed codes of the same session and client are replaced, so they can't
+/// pile up; redeemed ones stay until they expire, to recognise a second use.
 pub(crate) fn create_code(conn: &Connection, code: &NewCode<'_>) -> Result<(), DbError> {
+    conn.execute(
+        "DELETE FROM codes WHERE session_id = ?1 AND app_id = ?2 AND grant_id IS NULL",
+        params![code.session.0, code.app.0],
+    )?;
     conn.execute(
         "INSERT INTO codes (code_hash, app_id, session_id, redirect_uri, scope, nonce,
                             code_challenge, resource, expires_at)

@@ -15,28 +15,48 @@ pub(crate) fn create_code(
     session: SessionId,
     app: AppId,
     path: &str,
+    state_hash: &[u8; 32],
     expires_at: i64,
 ) -> Result<(), DbError> {
     conn.execute(
-        "INSERT INTO proxy_codes (code_hash, session_id, app_id, path, expires_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![hash.0, session.0, app.0, path, expires_at],
+        "DELETE FROM proxy_codes WHERE session_id = ?1 AND app_id = ?2",
+        params![session.0, app.0],
+    )?;
+    conn.execute(
+        "INSERT INTO proxy_codes (code_hash, session_id, app_id, path, state_hash, expires_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![hash.0, session.0, app.0, path, state_hash, expires_at],
     )?;
     Ok(())
 }
 
-/// Uses up a code: the session, application and path it was issued for, if it is still valid.
+/// A redeemed code: what it was issued for.
+pub(crate) struct Redeemed {
+    pub(crate) session: SessionId,
+    pub(crate) app: AppId,
+    pub(crate) path: String,
+    pub(crate) state_hash: Vec<u8>,
+}
+
+/// Uses up a code, if it is still valid.
 pub(crate) fn take_code(
     conn: &Connection,
     hash: &TokenHash,
     now: i64,
-) -> Result<Option<(SessionId, AppId, String)>, DbError> {
+) -> Result<Option<Redeemed>, DbError> {
     Ok(conn
         .query_row(
             "DELETE FROM proxy_codes WHERE code_hash = ?1 AND expires_at > ?2
-             RETURNING session_id, app_id, path",
+             RETURNING session_id, app_id, path, state_hash",
             params![hash.0, now],
-            |row| Ok((SessionId(row.get(0)?), AppId(row.get(1)?), row.get(2)?)),
+            |row| {
+                Ok(Redeemed {
+                    session: SessionId(row.get(0)?),
+                    app: AppId(row.get(1)?),
+                    path: row.get(2)?,
+                    state_hash: row.get(3)?,
+                })
+            },
         )
         .optional()?)
 }
@@ -47,6 +67,11 @@ pub(crate) fn create_session(
     session: SessionId,
     app: AppId,
 ) -> Result<(), DbError> {
+    // One per sign-in session and host, so repeated sign-ins can't pile up rows.
+    conn.execute(
+        "DELETE FROM proxy_sessions WHERE session_id = ?1 AND app_id = ?2",
+        params![session.0, app.0],
+    )?;
     conn.execute(
         "INSERT INTO proxy_sessions (token_hash, session_id, app_id) VALUES (?1, ?2, ?3)",
         params![hash.0, session.0, app.0],

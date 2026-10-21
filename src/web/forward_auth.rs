@@ -10,7 +10,7 @@ use hyper::{StatusCode, header};
 use super::i18n::Lang;
 use super::layout::auth_page;
 use super::{App, Failure, is_local_path, session};
-use crate::crypto::{TokenHash, random_token};
+use crate::crypto::{TokenHash, constant_time_eq, random_token, sha256};
 use crate::form::encode_pairs;
 use crate::html::{Html, html};
 use crate::http::cookie::{self, SetCookie};
@@ -21,6 +21,9 @@ use crate::store::proxy;
 use crate::time;
 
 const COOKIE: &str = "unlatch-proxy";
+/// Set on the protected host when a sign-in starts; the code must come back to the same browser.
+const STATE_COOKIE: &str = "unlatch-proxy-state";
+const STATE_LIFETIME: i64 = 30 * 60;
 /// A code must reach the protected host within a minute.
 const CODE_LIFETIME: i64 = 60;
 /// The per-host cookie lasts as long as a session can; the session decides validity.
@@ -42,22 +45,23 @@ fn forwarded(app: &App, request: &Request) -> Option<Forwarded> {
     if !trusted {
         return None;
     }
-    let first = |name: &str| {
-        request.header(name).map(|value| {
-            value
-                .split(',')
-                .next()
-                .unwrap_or_default()
-                .trim()
-                .to_owned()
-        })
+    // A proxy that appends to a list the client started adds its own value last; anything
+    // before it could have come from the client.
+    let last = |name: &str| {
+        request
+            .header(name)
+            .and_then(|value| value.rsplit(',').next())
+            .map(|value| value.trim().to_ascii_lowercase())
     };
-    let host = first("x-forwarded-host")?.to_ascii_lowercase();
-    let uri = first("x-forwarded-uri")
-        .or_else(|| first("x-original-uri"))
+    let host = last("x-forwarded-host")?;
+    let https = last("x-forwarded-proto").is_some_and(|proto| proto == "https");
+    // A path may contain commas, so it is never a list.
+    let uri = request
+        .header("x-forwarded-uri")
+        .or_else(|| request.header("x-original-uri"))
         .filter(|uri| is_local_path(uri))
-        .unwrap_or_else(|| "/".to_owned());
-    let https = first("x-forwarded-proto").is_some_and(|proto| proto == "https");
+        .unwrap_or("/")
+        .to_owned();
     Some(Forwarded { host, uri, https })
 }
 
@@ -110,7 +114,7 @@ pub(crate) async fn verify(app: &App, request: &Request, nginx: bool) -> Result<
         .await?;
     if known.is_none_or(|record| !record.enabled) {
         warning!(
-            "forward auth for {}, which no application protects",
+            "forward auth for {:?}, which no application protects",
             forwarded.host
         );
         return Ok(Response::text(
@@ -118,16 +122,27 @@ pub(crate) async fn verify(app: &App, request: &Request, nginx: bool) -> Result<
             "this host isn't protected by Unlatch",
         ));
     }
+    // The state cookie is set on the protected host through this answer, which the proxy passes
+    // to the browser. Only that browser can complete the sign-in, so a code issued to someone
+    // else's session can't be planted on a victim.
+    let state = random_token()?;
     let query = encode_pairs([
         ("host", forwarded.host.as_str()),
         ("uri", forwarded.uri.as_str()),
+        ("state", state.as_str()),
     ]);
     let start = app.config.issuer.url(&format!("/proxy/start?{query}"));
-    Ok(if nginx {
+    let cookie = SetCookie {
+        name: &cookie::name(STATE_COOKIE, forwarded.https),
+        value: &state,
+        max_age: Some(STATE_LIFETIME),
+    };
+    let response = if nginx {
         Response::text(StatusCode::UNAUTHORIZED, "sign-in required").header(header::LOCATION, start)
     } else {
         Response::redirect(start)
-    })
+    };
+    Ok(response.cookie(&cookie, forwarded.https))
 }
 
 /// `GET /proxy/start`: signs the user in if needed, checks access, and sends a one-time code
@@ -146,6 +161,10 @@ pub(crate) async fn start(app: &App, request: &Request) -> Result<Response, Fail
         .filter(|uri| is_local_path(uri))
         .unwrap_or("/")
         .to_owned();
+    if value("state").len() < 32 {
+        return Ok(expired(app, request));
+    }
+    let state_hash = sha256(value("state").as_bytes());
     let lookup = host.clone();
     let Some(record) = app
         .db
@@ -179,7 +198,17 @@ pub(crate) async fn start(app: &App, request: &Request) -> Result<Response, Fail
     let (hash, session_id, app_id) = (TokenHash::of(&code), current.id, record.id);
     let expires_at = time::now().saturating_add(CODE_LIFETIME);
     app.db
-        .run(move |conn| proxy::create_code(conn, &hash, session_id, app_id, &path, expires_at))
+        .run(move |conn| {
+            proxy::create_code(
+                conn,
+                &hash,
+                session_id,
+                app_id,
+                &path,
+                &state_hash,
+                expires_at,
+            )
+        })
         .await?;
     // Always https, except on this machine: the scheme in a link could be chosen by whoever made
     // the link, and a code sent over plain http could be read on the way.
@@ -230,9 +259,15 @@ pub(crate) async fn callback(app: &App, request: &Request) -> Result<Response, F
         .db
         .run(move |conn| proxy::take_code(conn, &hash, now))
         .await?;
-    let Some((session_id, app_id, path)) = redeemed else {
+    let state = request
+        .cookie(&cookie::name(STATE_COOKIE, https))
+        .unwrap_or_default();
+    let Some(redeemed) = redeemed
+        .filter(|redeemed| constant_time_eq(&sha256(state.as_bytes()), &redeemed.state_hash))
+    else {
         return Ok(expired(app, request));
     };
+    let (session_id, app_id, path) = (redeemed.session, redeemed.app, redeemed.path);
     let record = app.db.run(move |conn| apps::by_id(conn, app_id)).await?;
     if record.is_none_or(|record| record.host.as_deref() != Some(host.as_str())) {
         return Ok(expired(app, request));
@@ -252,7 +287,14 @@ pub(crate) async fn callback(app: &App, request: &Request) -> Result<Response, F
     } else {
         "/".to_owned()
     };
-    Ok(Response::redirect(path).cookie(&cookie, https))
+    let clear_state = SetCookie {
+        name: &cookie::name(STATE_COOKIE, https),
+        value: "",
+        max_age: Some(0),
+    };
+    Ok(Response::redirect(path)
+        .cookie(&cookie, https)
+        .cookie(&clear_state, https))
 }
 
 /// `GET /_unlatch/logout` on a protected host: forgets this host's session and continues to

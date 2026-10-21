@@ -35,7 +35,9 @@ Commands:
 ";
 
 fn main() -> ExitCode {
-    let command = std::env::args().nth(1);
+    let command = std::env::args_os()
+        .nth(1)
+        .map(|arg| arg.to_string_lossy().into_owned());
     match command.as_deref() {
         None | Some("serve") => serve(),
         Some("generate-key") => match MasterKey::generate() {

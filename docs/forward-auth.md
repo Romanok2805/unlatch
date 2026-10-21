@@ -64,7 +64,8 @@ http:
 ## nginx
 
 nginx's `auth_request` only understands success or 401, so it uses `/forward-auth/nginx`, which
-answers 401 with the sign-in address in `Location`.
+answers 401 with the sign-in address in `Location` and a cookie that ties the sign-in to this
+browser; nginx has to pass the cookie on.
 
 ```nginx
 server {
@@ -92,6 +93,8 @@ server {
     location / {
         auth_request /_unlatch_check;
         auth_request_set $sign_in $upstream_http_location;
+        auth_request_set $sign_in_cookie $upstream_http_set_cookie;
+        add_header Set-Cookie $sign_in_cookie always;
         error_page 401 =302 $sign_in;
 
         auth_request_set $user $upstream_http_remote_user;

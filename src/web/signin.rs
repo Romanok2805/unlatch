@@ -16,7 +16,7 @@ use super::layout::{auth_page, error_notice, icon, reveal_button};
 use super::oidc::client_name_for;
 use super::{App, Failure, is_local_path, session};
 use crate::crypto::password::{self, PasswordHash};
-use crate::crypto::{sha256, totp};
+use crate::crypto::totp;
 use crate::encoding::{base64url, decode_base64url};
 use crate::form::encode;
 use crate::html::{Html, html};
@@ -25,7 +25,7 @@ use crate::http::{Request, Response};
 use crate::log::info;
 use crate::secret::Secret;
 use crate::store::audit;
-use crate::store::users::{self, User, UserId};
+use crate::store::users::{self, User, UserId, Username};
 use crate::time;
 
 const PENDING_COOKIE: &str = "signin";
@@ -222,10 +222,13 @@ pub(super) async fn submit(app: &App, request: &Request) -> Result<Response, Fai
         .ok()
         .flatten()
         .unwrap_or_default();
-    let address = request.client_ip.to_string();
-    let limits = &app.limits;
-    if !limits.password_by_address.allows(&address) || !limits.password_by_account.allows(&username)
-    {
+    // Names that can't exist share one key, so junk names can't fill the limiter.
+    let account_key = if Username::parse(&username).is_some() {
+        username.as_str()
+    } else {
+        ""
+    };
+    if !app.limits.password_attempt(request.client_ip, account_key) {
         return login_page(app, request, &username, &next, Some(text.too_many_attempts)).await;
     }
 
@@ -240,12 +243,11 @@ pub(super) async fn submit(app: &App, request: &Request) -> Result<Response, Fai
         .and_then(|user| user.password_hash.clone());
     let matched = check_password(app, password, hash).await?;
     let Some(user) = user.filter(|_| matched) else {
-        limits.password_by_address.fail(&address);
-        limits.password_by_account.fail(&username);
-        info!("wrong password for {username:?} from {address}");
+        info!("wrong password for {username:?} from {}", request.client_ip);
         return login_page(app, request, &username, &next, Some(text.wrong_credentials)).await;
     };
-    limits.password_by_account.reset(&username);
+    app.limits
+        .password_succeeded(request.client_ip, account_key);
 
     if user
         .password_hash
@@ -480,8 +482,7 @@ pub(super) async fn second_step_submit(
         return second_step_form(app, request, step, Some(text.form_expired));
     }
     let key = checked.user.0.to_string();
-    let limits = &app.limits;
-    if !limits.code_per_quarter_hour.allows(&key) || !limits.code_per_day.allows(&key) {
+    if !app.limits.code_attempt(&key) {
         return second_step_form(app, request, step, Some(text.too_many_attempts));
     }
     let input = request
@@ -504,22 +505,20 @@ pub(super) async fn second_step_submit(
     let accepted = match step {
         Step::Code => verify_code(app, &user, &input).await?,
         Step::Recovery => {
-            let hash = recovery_code_hash(&input);
+            let hash = recovery_code_hash(app, user_id, &input);
             app.db
                 .run(move |conn| users::use_recovery_code(conn, user_id, &hash))
                 .await?
         }
     };
     if !accepted {
-        limits.code_per_quarter_hour.fail(&key);
-        limits.code_per_day.fail(&key);
         info!(
             "wrong second factor for {:?} from {}",
             user.username, request.client_ip
         );
         return second_step_form(app, request, step, Some(text.wrong_code));
     }
-    limits.code_per_quarter_hour.reset(&key);
+    app.limits.code_succeeded(&key);
     let signed_in = SignedIn {
         user: user.id,
         username: user.username,
@@ -562,11 +561,15 @@ pub(super) fn totp_context(user: UserId) -> Vec<u8> {
 }
 
 /// Recovery codes are compared without case, spaces or dashes, so they can be typed loosely.
-pub(super) fn recovery_code_hash(input: &str) -> [u8; 32] {
+/// They are stored keyed with the master key: 50 random bits under a plain hash could be found
+/// by trying every value against a copy of the database.
+pub(super) fn recovery_code_hash(app: &App, user: UserId, input: &str) -> [u8; 32] {
     let normalized: String = input
         .chars()
         .filter(char::is_ascii_alphanumeric)
         .map(|c| c.to_ascii_lowercase())
         .collect();
-    sha256(normalized.as_bytes())
+    app.keys
+        .recovery
+        .sign(format!("{} {normalized}", user.0).as_bytes())
 }

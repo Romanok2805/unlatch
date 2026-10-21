@@ -337,14 +337,25 @@ pub(super) async fn edit(
     let editing_self = user.id == admin.session.user.id;
     match field(request, "action") {
         "delete" => {
-            if editing_self || (user.is_admin && !user.disabled && last_admin(app).await?) {
+            if editing_self {
                 return Ok(view(
                     &Draft::stored(&user, user_groups),
                     Some(text.keep_an_admin),
                 ));
             }
+            // Sessions end first, while their applications can still be found to be told.
             session::end(app, Ending::AllOf(id, None)).await?;
-            app.db.run(move |conn| users::delete(conn, id)).await?;
+            if app
+                .db
+                .run(move |conn| users::delete(conn, id))
+                .await?
+                .is_err()
+            {
+                return Ok(view(
+                    &Draft::stored(&user, user_groups),
+                    Some(text.keep_an_admin),
+                ));
+            }
             admin
                 .record(app, request, "delete user", &user.username)
                 .await?;
@@ -357,17 +368,17 @@ pub(super) async fn edit(
                 Ok(changes) => changes,
                 Err(problem) => return Ok(view(&draft, Some(problem))),
             };
-            let loses_admin =
-                user.is_admin && !user.disabled && (!changes.is_admin || changes.disabled);
-            if loses_admin && last_admin(app).await? {
-                return Ok(view(&draft, Some(text.keep_an_admin)));
-            }
             if changes.disabled {
                 session::end(app, Ending::AllOf(id, None)).await?;
             }
-            app.db
+            if app
+                .db
                 .run(move |conn| users::update(conn, id, &changes))
-                .await?;
+                .await?
+                .is_err()
+            {
+                return Ok(view(&draft, Some(text.keep_an_admin)));
+            }
             admin
                 .record(app, request, "change user", &user.username)
                 .await?;
@@ -432,10 +443,6 @@ async fn act(
             )))
         }
     }
-}
-
-async fn last_admin(app: &App) -> Result<bool, Failure> {
-    Ok(app.db.run(|conn| users::active_admin_count(conn)).await? <= 1)
 }
 
 /// An optional email address. Only the shape is checked; whether the address works is up to

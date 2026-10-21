@@ -42,17 +42,18 @@ arrives over the network is untrusted, including connected applications and outs
 | Cross-site request forgery | [CSRF tokens](architecture.md#sessions-and-pages) |
 | Cross-site scripting | [`Html` type, CSP, Trusted Types](architecture.md#sessions-and-pages) |
 | Showing the sign-in page in a hidden frame | [Framing forbidden by CSP](architecture.md#sessions-and-pages) |
-| Malicious uploaded files | [PNG and WebP only, sandbox](architecture.md#sessions-and-pages) |
-| Making Unlatch fetch internal addresses | [No fetching of user-supplied addresses](architecture.md#sessions-and-pages) |
+| Making Unlatch fetch internal addresses | [Only addresses an administrator configured](architecture.md#sessions-and-pages) |
 | Open redirects, altered redirect URIs | [Exact match, error page](architecture.md#openid-connect) |
 | Mixing up responses from two providers | [`iss` in responses](architecture.md#openid-connect) |
+| Another program posing as a native app | [Consent asked every time](architecture.md#openid-connect) |
 | Intercepted or replayed authorization codes | [PKCE, single-use codes](architecture.md#tokens) |
 | Using a token at the wrong service | [Audience, `at+jwt`](architecture.md#tokens) |
-| Stolen refresh token | [Rotation, reuse revokes the session](architecture.md#tokens) |
+| Stolen refresh token | [Rotation, reuse revokes the grant](architecture.md#tokens) |
 | Keeping access after removal from a group | [Checks on every refresh](architecture.md#tokens) |
 | Stolen signing key | [Rotation](architecture.md#tokens), [encryption at rest](architecture.md#storage) |
 | Stolen database or backup | [Hashes and encryption](architecture.md#storage) |
-| Faked identity headers in forward auth | [Proxy removes them](architecture.md#forward-authentication) |
+| Faked identity headers in forward auth | [Trusted proxies only, headers always set](architecture.md#forward-authentication) |
+| Signing a victim in to someone else's account | [Codes tied to the browser](architecture.md#forward-authentication), [CSRF tokens](architecture.md#sessions-and-pages) |
 | Faked `X-Forwarded-*` or `Host` headers | [Trusted proxy list, fixed issuer](architecture.md#network) |
 | Running out of memory or connections | [Limits](architecture.md#network), [hashing queue](architecture.md#signing-in) |
 | Malicious dependency | [Dependency review](../CONTRIBUTING.md#adding-a-dependency), `deny.toml`, CI actions pinned by commit |

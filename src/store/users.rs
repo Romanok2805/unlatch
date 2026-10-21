@@ -1,6 +1,6 @@
 //! Accounts.
 
-use rusqlite::{Connection, OptionalExtension as _, Row, params};
+use rusqlite::{Connection, OptionalExtension as _, Row, Transaction, params};
 
 use super::DbError;
 use super::groups::GroupId;
@@ -251,11 +251,17 @@ pub(crate) struct UserChanges {
     pub(crate) groups: Vec<GroupId>,
 }
 
+/// Refused: no administrator who can sign in would be left.
+#[derive(Debug)]
+pub(crate) struct LastAdmin;
+
+/// Applies an administrator's changes, unless the user is the last administrator who can sign in
+/// and would stop being one.
 pub(crate) fn update(
     conn: &mut Connection,
     id: UserId,
     changes: &UserChanges,
-) -> Result<(), DbError> {
+) -> Result<Result<(), LastAdmin>, DbError> {
     let tx = conn.transaction()?;
     tx.execute(
         "UPDATE users SET display_name = ?2, email = ?3, email_verified = ?4, is_admin = ?5,
@@ -280,8 +286,7 @@ pub(crate) fn update(
     if changes.disabled {
         tx.execute("DELETE FROM sessions WHERE user_id = ?1", [id.0])?;
     }
-    tx.commit()?;
-    Ok(())
+    commit_keeping_an_admin(tx)
 }
 
 pub(crate) fn groups(conn: &Connection, id: UserId) -> Result<Vec<GroupId>, DbError> {
@@ -292,18 +297,28 @@ pub(crate) fn groups(conn: &Connection, id: UserId) -> Result<Vec<GroupId>, DbEr
     Ok(groups)
 }
 
-/// Administrators who can still sign in. The last one can't be demoted, disabled or deleted.
-pub(crate) fn active_admin_count(conn: &Connection) -> Result<i64, DbError> {
-    Ok(conn.query_row(
+/// Deletes a user, unless it is the last administrator who can sign in.
+pub(crate) fn delete(conn: &mut Connection, id: UserId) -> Result<Result<(), LastAdmin>, DbError> {
+    let tx = conn.transaction()?;
+    tx.execute("DELETE FROM users WHERE id = ?1", [id.0])?;
+    commit_keeping_an_admin(tx)
+}
+
+/// Commits a change only if an administrator who can sign in is left. The count is taken after
+/// the change, in the same transaction, so two administrators demoting each other at the same
+/// moment can't both succeed.
+fn commit_keeping_an_admin(tx: Transaction<'_>) -> Result<Result<(), LastAdmin>, DbError> {
+    let admins: i64 = tx.query_row(
         "SELECT count(*) FROM users WHERE is_admin AND NOT disabled",
         [],
         |row| row.get(0),
-    )?)
-}
-
-pub(crate) fn delete(conn: &Connection, id: UserId) -> Result<(), DbError> {
-    conn.execute("DELETE FROM users WHERE id = ?1", [id.0])?;
-    Ok(())
+    )?;
+    if admins == 0 {
+        // Dropping the transaction rolls it back.
+        return Ok(Err(LastAdmin));
+    }
+    tx.commit()?;
+    Ok(Ok(()))
 }
 
 #[cfg(test)]
@@ -348,5 +363,32 @@ mod tests {
             })
             .await;
         assert!(result.unwrap_err().is_constraint_violation());
+    }
+
+    #[tokio::test]
+    async fn the_last_admin_stays_and_ids_are_never_reused() {
+        let db = Db::open_in_memory().unwrap();
+        let add = |conn: &Connection, name| {
+            let name = Username::parse(name).unwrap();
+            let new = NewUser {
+                username: &name,
+                display_name: "",
+                email: None,
+                is_admin: true,
+            };
+            create(conn, &new)
+        };
+        db.run(move |conn| {
+            let anna = add(conn, "anna")?;
+            let boris = add(conn, "boris")?;
+            assert!(delete(conn, anna)?.is_ok());
+            assert!(delete(conn, boris)?.is_err());
+            assert!(by_id(conn, boris)?.is_some());
+            // A new account must not inherit tokens, grants or the `sub` of a deleted one.
+            assert_ne!(add(conn, "anna")?, anna);
+            Ok(())
+        })
+        .await
+        .unwrap();
     }
 }

@@ -1,5 +1,9 @@
 -- Version 1. Times are Unix seconds. Tokens are stored as SHA-256 hashes and secrets sealed with a
 -- key derived from the master key; see docs/architecture.md.
+--
+-- Row IDs are AUTOINCREMENT, so an ID is never given out again after its row is deleted: subjects
+-- are derived from user IDs and refresh tokens name grant IDs, and a reused ID would hand one
+-- person's identity or grant to another.
 
 CREATE TABLE settings (
     name TEXT PRIMARY KEY,
@@ -7,7 +11,7 @@ CREATE TABLE settings (
 ) STRICT;
 
 CREATE TABLE users (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL UNIQUE,
     display_name TEXT NOT NULL,
     email TEXT,
@@ -36,7 +40,7 @@ CREATE TABLE password_links (
 ) STRICT;
 
 CREATE TABLE groups (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE
 ) STRICT;
 
@@ -50,7 +54,7 @@ CREATE INDEX group_members_user ON group_members (user_id);
 
 -- Applications: OpenID Connect clients and hosts protected by forward authentication.
 CREATE TABLE apps (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     kind TEXT NOT NULL CHECK (kind IN ('oidc', 'proxy')),
     enabled INTEGER NOT NULL DEFAULT 1,
@@ -89,7 +93,7 @@ CREATE TABLE consents (
 ) STRICT;
 
 CREATE TABLE sessions (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     token_hash BLOB NOT NULL UNIQUE,
     -- The `sid` claim. Unlike the token, it is safe to show and to send to applications.
     public_id TEXT NOT NULL UNIQUE,
@@ -125,7 +129,7 @@ CREATE TABLE codes (
 -- and names its grant and generation. Only the current generation is accepted, and an older one
 -- means the token was copied, so the grant is revoked.
 CREATE TABLE grants (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id INTEGER NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
     app_id INTEGER NOT NULL REFERENCES apps (id) ON DELETE CASCADE,
     scope TEXT NOT NULL,
@@ -150,6 +154,8 @@ CREATE TABLE proxy_codes (
     session_id INTEGER NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
     app_id INTEGER NOT NULL REFERENCES apps (id) ON DELETE CASCADE,
     path TEXT NOT NULL,
+    -- Hash of the state cookie set on the protected host, which ties the code to that browser.
+    state_hash BLOB NOT NULL,
     expires_at INTEGER NOT NULL
 ) STRICT;
 
@@ -173,7 +179,7 @@ CREATE TABLE signing_keys (
 ) STRICT;
 
 CREATE TABLE providers (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     -- Part of the callback URL registered at the provider.
     slug TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL,
@@ -199,7 +205,7 @@ CREATE INDEX provider_links_user ON provider_links (user_id);
 
 -- Kept after the user or app is deleted, so references are copied as text.
 CREATE TABLE audit_log (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     at INTEGER NOT NULL,
     actor TEXT NOT NULL,
     action TEXT NOT NULL,
