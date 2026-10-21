@@ -1,4 +1,6 @@
-doc-valid-idents = ["OpenID", ".."]
+doc-valid-idents = ["OpenID", "DPoP", ".."]
+# An application's settings are checkboxes: enabled, everyone, consent, PAR and DPoP.
+max-struct-bools = 5
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 allow-panic-in-tests = true

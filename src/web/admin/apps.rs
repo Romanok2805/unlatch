@@ -324,6 +324,8 @@ struct Draft {
     enabled: bool,
     all_users: bool,
     skip_consent: bool,
+    require_par: bool,
+    require_dpop: bool,
     id_token_alg: String,
     backchannel_logout_uri: String,
     host: String,
@@ -342,6 +344,8 @@ impl Draft {
             enabled: record.enabled,
             all_users: record.all_users,
             skip_consent: record.skip_consent,
+            require_par: record.require_par,
+            require_dpop: record.require_dpop,
             id_token_alg: record.id_token_alg.name().to_owned(),
             backchannel_logout_uri: record.backchannel_logout_uri.clone().unwrap_or_default(),
             host: record.host.clone().unwrap_or_default(),
@@ -358,6 +362,8 @@ impl Draft {
             enabled: checked(request, "enabled"),
             all_users: checked(request, "all_users"),
             skip_consent: checked(request, "skip_consent"),
+            require_par: checked(request, "require_par"),
+            require_dpop: checked(request, "require_dpop"),
             id_token_alg: field(request, "id_token_alg").to_owned(),
             backchannel_logout_uri: field(request, "backchannel_logout_uri").to_owned(),
             host: field(request, "host").to_owned(),
@@ -401,6 +407,8 @@ impl Draft {
             enabled: self.enabled,
             all_users: self.all_users,
             skip_consent: self.skip_consent,
+            require_par: self.require_par,
+            require_dpop: self.require_dpop,
             id_token_alg: Algorithm::from_name(&self.id_token_alg).unwrap_or(Algorithm::Rs256),
             backchannel_logout_uri,
             host,
@@ -681,6 +689,14 @@ fn oidc_fields(out: &mut Html, admin: &Admin, draft: &Draft) {
         "backchannel_logout_uri",
         &draft.backchannel_logout_uri,
         Some(text.backchannel_logout_note),
+    );
+    checkbox(out, text.require_par, "require_par", "1", draft.require_par);
+    checkbox(
+        out,
+        text.require_dpop,
+        "require_dpop",
+        "1",
+        draft.require_dpop,
     );
 }
 

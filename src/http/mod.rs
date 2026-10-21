@@ -83,6 +83,16 @@ impl Request {
         self.headers.get(name)?.to_str().ok()
     }
 
+    /// A header that must not repeat: `Err` if it does or isn't text.
+    pub(crate) fn only_header(&self, name: &str) -> Result<Option<&str>, ()> {
+        let mut values = self.headers.get_all(name).iter();
+        match (values.next(), values.next()) {
+            (None, _) => Ok(None),
+            (Some(value), None) => value.to_str().map(Some).map_err(|_| ()),
+            (Some(_), Some(_)) => Err(()),
+        }
+    }
+
     pub(crate) fn cookie(&self, name: &str) -> Option<&str> {
         self.headers
             .get_all(header::COOKIE)

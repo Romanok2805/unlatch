@@ -68,6 +68,14 @@ pub(crate) struct AccessClaims {
     pub(crate) auth_time: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) sid: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cnf: Option<Confirmation>,
+}
+
+/// The key a token is bound to (RFC 7800), named by its thumbprint (RFC 9449 section 6).
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct Confirmation {
+    pub(crate) jkt: String,
 }
 
 /// Who an access token is for.
@@ -80,18 +88,26 @@ pub(crate) enum Holder<'a> {
     Client,
 }
 
+/// What an access token is issued for.
+pub(crate) struct Access<'a> {
+    pub(crate) client_id: &'a str,
+    pub(crate) holder: Holder<'a>,
+    pub(crate) scope: &'a str,
+    pub(crate) resource: Option<&'a str>,
+    /// The thumbprint of the DPoP key the token is bound to.
+    pub(crate) dpop: Option<&'a str>,
+}
+
 /// An access token. Its audience is the API named with `resource`, or the client itself, so a
 /// token issued to one application is refused by every other.
 pub(crate) fn access_token(
     app: &App,
     ring: &KeyRing,
     now: i64,
-    client_id: &str,
-    holder: &Holder<'_>,
-    scope: &str,
-    resource: Option<&str>,
+    access: &Access<'_>,
 ) -> Result<String, CryptoError> {
-    let (sub, auth_time, sid) = match holder {
+    let client_id = access.client_id;
+    let (sub, auth_time, sid) = match &access.holder {
         Holder::User { subject, session } => (
             subject.clone(),
             Some(session.auth_time),
@@ -102,14 +118,17 @@ pub(crate) fn access_token(
     let claims = AccessClaims {
         iss: app.config.issuer.as_str().to_owned(),
         sub,
-        aud: resource.unwrap_or(client_id).to_owned(),
+        aud: access.resource.unwrap_or(client_id).to_owned(),
         client_id: client_id.to_owned(),
         iat: now,
         exp: now.saturating_add(ACCESS_TOKEN_LIFETIME),
         jti: base64url(&random_bytes::<16>()?),
-        scope: scope.to_owned(),
+        scope: access.scope.to_owned(),
         auth_time,
         sid,
+        cnf: access.dpop.map(|jkt| Confirmation {
+            jkt: jkt.to_owned(),
+        }),
     };
     // Access tokens are always RS256, which every resource server library understands.
     let key = ring.current(Algorithm::Rs256, now).ok_or(CryptoError)?;

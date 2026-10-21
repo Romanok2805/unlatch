@@ -224,8 +224,17 @@ pub(crate) struct VerifyingKey {
 
 impl VerifyingKey {
     fn new(material: Material) -> Self {
-        let kid = base64url(&sha256(material.thumbprint_input().as_bytes()));
-        Self { kid, material }
+        let mut key = Self {
+            kid: String::new(),
+            material,
+        };
+        key.kid = key.thumbprint();
+        key
+    }
+
+    /// The RFC 7638 thumbprint, which names the key whatever `kid` it was published with.
+    pub(crate) fn thumbprint(&self) -> String {
+        base64url(&sha256(self.material.thumbprint_input().as_bytes()))
     }
 
     /// Reads a key from a JWK set. Keys for other uses or algorithms, and RSA keys under 2048
@@ -369,21 +378,35 @@ impl fmt::Display for JwtError {
     }
 }
 
-/// Checks a compact JWT against `keys` and returns its payload. Only the signature, algorithm and
-/// `typ` are checked here; the caller checks the claims.
-pub(crate) fn verify_jwt(
-    token: &str,
-    keys: &[VerifyingKey],
-    typ: Option<&str>,
-) -> Result<Vec<u8>, JwtError> {
-    #[derive(Deserialize)]
-    struct Header {
-        alg: String,
-        kid: Option<String>,
-        typ: Option<String>,
-        crit: Option<serde_json::Value>,
-    }
+#[derive(Deserialize)]
+struct Header {
+    alg: String,
+    kid: Option<String>,
+    typ: Option<String>,
+    crit: Option<serde_json::Value>,
+    jwk: Option<serde_json::Value>,
+}
 
+/// A compact JWS taken apart. Only its shape, algorithm and `typ` have been checked.
+struct Parts<'a> {
+    header: Header,
+    algorithm: Algorithm,
+    /// The part the signature covers: `header.payload`, as sent.
+    signed: &'a str,
+    payload: &'a str,
+    signature: Vec<u8>,
+}
+
+impl Parts<'_> {
+    fn verify(self, key: &VerifyingKey) -> Result<Vec<u8>, JwtError> {
+        if !key.verify(self.signed.as_bytes(), &self.signature) {
+            return Err(JwtError::BadSignature);
+        }
+        decode_base64url(self.payload).ok_or(JwtError::Malformed)
+    }
+}
+
+fn parse<'a>(token: &'a str, typ: Option<&str>) -> Result<Parts<'a>, JwtError> {
     if token.len() > MAX_TOKEN_LEN {
         return Err(JwtError::Malformed);
     }
@@ -394,42 +417,66 @@ pub(crate) fn verify_jwt(
         return Err(JwtError::Malformed);
     };
     let header_json = decode_base64url(header).ok_or(JwtError::Malformed)?;
-    let header_fields: Header =
-        serde_json::from_slice(&header_json).map_err(|_| JwtError::Malformed)?;
+    let fields: Header = serde_json::from_slice(&header_json).map_err(|_| JwtError::Malformed)?;
     // We understand no extensions, and RFC 7515 says to reject tokens that require one.
-    if header_fields.crit.is_some() {
+    if fields.crit.is_some() {
         return Err(JwtError::Malformed);
     }
-    let algorithm =
-        Algorithm::from_name(&header_fields.alg).ok_or(JwtError::UnsupportedAlgorithm)?;
+    let algorithm = Algorithm::from_name(&fields.alg).ok_or(JwtError::UnsupportedAlgorithm)?;
     if let Some(expected) = typ {
-        let actual = header_fields.typ.as_deref().unwrap_or_default();
+        let actual = fields.typ.as_deref().unwrap_or_default();
         if !actual.eq_ignore_ascii_case(expected) {
             return Err(JwtError::WrongType);
         }
     }
+    let signed_len = header.len().saturating_add(1).saturating_add(payload.len());
+    Ok(Parts {
+        header: fields,
+        algorithm,
+        signed: token.get(..signed_len).ok_or(JwtError::Malformed)?,
+        payload,
+        signature: decode_base64url(signature).ok_or(JwtError::Malformed)?,
+    })
+}
 
-    let mut candidates = keys.iter().filter(|key| {
-        key.algorithm() == algorithm
-            && header_fields
-                .kid
-                .as_deref()
-                .is_none_or(|kid| kid == key.kid)
-    });
+/// Checks a compact JWT against `keys` and returns its payload. Only the signature, algorithm and
+/// `typ` are checked here; the caller checks the claims.
+pub(crate) fn verify_jwt(
+    token: &str,
+    keys: &[VerifyingKey],
+    typ: Option<&str>,
+) -> Result<Vec<u8>, JwtError> {
+    let parts = parse(token, typ)?;
+    let kid = parts.header.kid.as_deref();
+    let mut candidates = keys
+        .iter()
+        .filter(|key| key.algorithm() == parts.algorithm && kid.is_none_or(|kid| kid == key.kid));
     let key = match (candidates.next(), candidates.next()) {
         (Some(key), None) => key,
         // Without a kid, several keys of one algorithm would be guesswork.
-        (Some(key), Some(_)) if header_fields.kid.is_some() => key,
+        (Some(key), Some(_)) if kid.is_some() => key,
         _ => return Err(JwtError::UnknownKey),
     };
+    parts.verify(key)
+}
 
-    let signature = decode_base64url(signature).ok_or(JwtError::Malformed)?;
-    let signed_len = header.len().saturating_add(1).saturating_add(payload.len());
-    let signed = token.get(..signed_len).ok_or(JwtError::Malformed)?;
-    if !key.verify(signed.as_bytes(), &signature) {
-        return Err(JwtError::BadSignature);
+/// Checks a JWT signed with the key in its own `jwk` header, such as a DPoP proof (RFC 9449):
+/// the signature proves that the sender holds the private key. Returns the payload and the
+/// key's thumbprint (RFC 7638).
+pub(crate) fn verify_self_signed(token: &str, typ: &str) -> Result<(Vec<u8>, String), JwtError> {
+    let mut parts = parse(token, Some(typ))?;
+    let jwk = parts.header.jwk.take().ok_or(JwtError::UnknownKey)?;
+    // A private key in the header would be a client giving its key away; refuse to use it.
+    if jwk.get("d").is_some() {
+        return Err(JwtError::UnknownKey);
     }
-    decode_base64url(payload).ok_or(JwtError::Malformed)
+    let jwk: Jwk = serde_json::from_value(jwk).map_err(|_| JwtError::Malformed)?;
+    let key = VerifyingKey::from_jwk(&jwk).ok_or(JwtError::UnknownKey)?;
+    if key.algorithm() != parts.algorithm {
+        return Err(JwtError::UnsupportedAlgorithm);
+    }
+    let thumbprint = key.thumbprint();
+    Ok((parts.verify(&key)?, thumbprint))
 }
 
 #[cfg(test)]
@@ -468,6 +515,44 @@ mod tests {
             tampered.insert(token.find('.').unwrap() + 2, 'A');
             assert!(verify_jwt(&tampered, &keys, None).is_err());
         }
+    }
+
+    #[test]
+    fn self_signed_tokens_prove_the_key_in_their_header() {
+        let (key, _) = SigningKey::generate(Algorithm::Es256).unwrap();
+        let token = |jwk: serde_json::Value| {
+            let header = serde_json::json!({ "alg": "ES256", "typ": "dpop+jwt", "jwk": jwk });
+            let signed = format!(
+                "{}.{}",
+                base64url(header.to_string().as_bytes()),
+                base64url(b"{}")
+            );
+            let signature = key.sign(signed.as_bytes()).unwrap();
+            format!("{signed}.{}", base64url(&signature))
+        };
+        let public = serde_json::to_value(key.verifying_key().jwk()).unwrap();
+        let (payload, thumbprint) = verify_self_signed(&token(public.clone()), "dpop+jwt").unwrap();
+        assert_eq!(
+            (payload.as_slice(), thumbprint.as_str()),
+            (&b"{}"[..], key.kid())
+        );
+        assert_eq!(
+            verify_self_signed(&token(public.clone()), "at+jwt"),
+            Err(JwtError::WrongType)
+        );
+
+        let mut private = public;
+        private["d"] = "AAAA".into();
+        assert_eq!(
+            verify_self_signed(&token(private), "dpop+jwt"),
+            Err(JwtError::UnknownKey)
+        );
+        let (other, _) = SigningKey::generate(Algorithm::Es256).unwrap();
+        let other = serde_json::to_value(other.verifying_key().jwk()).unwrap();
+        assert_eq!(
+            verify_self_signed(&token(other), "dpop+jwt"),
+            Err(JwtError::BadSignature)
+        );
     }
 
     #[test]

@@ -4,8 +4,9 @@ use hyper::{StatusCode, header};
 use serde::Serialize;
 
 use super::super::{App, Failure};
+use super::dpop;
 use super::token::authenticate;
-use super::tokens::{self, AccessClaims, UserClaims};
+use super::tokens::{self, AccessClaims, Confirmation, UserClaims};
 use crate::crypto::verify_jwt;
 use crate::http::{Request, Response};
 use crate::store::sessions::{self, ActiveSession};
@@ -45,30 +46,58 @@ async fn check_access_token(
     }
 }
 
-fn bearer(request: &Request) -> Option<&str> {
-    let value = request.header(header::AUTHORIZATION)?;
-    value
-        .strip_prefix("Bearer ")
-        .or_else(|| value.strip_prefix("bearer "))
-        .map(str::trim)
+/// The access token in the `Authorization` header, and whether it came under the `DPoP` scheme
+/// (RFC 9449 section 7.1) rather than `Bearer`.
+fn presented_token(request: &Request) -> Option<(&str, bool)> {
+    let (scheme, token) = request.header(header::AUTHORIZATION)?.split_once(' ')?;
+    let dpop = if scheme.eq_ignore_ascii_case("DPoP") {
+        true
+    } else if scheme.eq_ignore_ascii_case("Bearer") {
+        false
+    } else {
+        return None;
+    };
+    Some((token.trim(), dpop))
 }
 
-fn invalid_token() -> Response {
-    Response::text(StatusCode::UNAUTHORIZED, "invalid token")
-        .header(header::WWW_AUTHENTICATE, "Bearer error=\"invalid_token\"")
+fn unauthorized(challenge: String) -> Response {
+    Response::text(StatusCode::UNAUTHORIZED, "the access token was refused")
+        .header(header::WWW_AUTHENTICATE, challenge)
+}
+
+/// The challenge for a token that is missing or was refused; either scheme is welcome.
+fn invalid_token(refused: bool) -> Response {
+    let algs = dpop::algorithms().join(" ");
+    unauthorized(if refused {
+        format!("Bearer error=\"invalid_token\", DPoP error=\"invalid_token\", algs=\"{algs}\"")
+    } else {
+        format!("Bearer, DPoP algs=\"{algs}\"")
+    })
 }
 
 /// `GET` or `POST /userinfo`: the claims about the user the token was issued for.
 pub(crate) async fn userinfo(app: &App, request: &Request) -> Result<Response, Failure> {
-    let Some(token) = bearer(request) else {
-        return Ok(
-            Response::text(StatusCode::UNAUTHORIZED, "a bearer token is required")
-                .header(header::WWW_AUTHENTICATE, "Bearer"),
-        );
+    let Some((token, dpop_scheme)) = presented_token(request) else {
+        return Ok(invalid_token(false));
     };
     let Some((claims, Some(session))) = check_access_token(app, token).await? else {
-        return Ok(invalid_token());
+        return Ok(invalid_token(true));
     };
+    // A bound token needs a proof of its key, and the DPoP scheme is only for bound tokens, so
+    // neither can pass for the other.
+    match (&claims.cnf, dpop_scheme) {
+        (None, false) => {}
+        (Some(cnf), true) => match dpop::check(app, request, "/userinfo", Some(token)) {
+            Ok(Some(key)) if key == cnf.jkt => {}
+            Ok(_) => {
+                return Ok(invalid_proof(
+                    "the DPoP proof is missing or for another key",
+                ));
+            }
+            Err(description) => return Ok(invalid_proof(description)),
+        },
+        _ => return Ok(invalid_token(true)),
+    }
     if !claims.scope.split(' ').any(|scope| scope == "openid") {
         return Ok(
             Response::text(StatusCode::FORBIDDEN, "the token lacks the openid scope").header(
@@ -88,6 +117,13 @@ pub(crate) async fn userinfo(app: &App, request: &Request) -> Result<Response, F
         groups,
         &claims.scope,
     )))
+}
+
+fn invalid_proof(description: &str) -> Response {
+    let algs = dpop::algorithms().join(" ");
+    unauthorized(format!(
+        "DPoP error=\"invalid_dpop_proof\", error_description=\"{description}\", algs=\"{algs}\""
+    ))
 }
 
 #[derive(Serialize, Default)]
@@ -111,6 +147,8 @@ struct Introspection {
     aud: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     iss: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cnf: Option<Confirmation>,
 }
 
 /// `POST /introspect` (RFC 7662). A client may only learn about tokens issued to it or meant
@@ -138,12 +176,17 @@ pub(crate) async fn introspect(app: &App, request: &Request) -> Result<Response,
         scope: Some(claims.scope),
         client_id: Some(claims.client_id),
         username: session.map(|session| session.user.username),
-        token_type: Some("Bearer"),
+        token_type: Some(if claims.cnf.is_some() {
+            "DPoP"
+        } else {
+            "Bearer"
+        }),
         exp: Some(claims.exp),
         iat: Some(claims.iat),
         sub: Some(claims.sub),
         aud: Some(claims.aud),
         iss: Some(claims.iss),
+        cnf: claims.cnf,
     }))
 }
 

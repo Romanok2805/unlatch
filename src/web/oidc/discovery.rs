@@ -4,7 +4,7 @@ use hyper::header;
 use serde::Serialize;
 
 use super::super::App;
-use super::SCOPES;
+use super::{SCOPES, dpop};
 use crate::crypto::{Algorithm, Jwk};
 use crate::http::Response;
 
@@ -22,6 +22,7 @@ struct Metadata<'a> {
     end_session_endpoint: String,
     revocation_endpoint: String,
     introspection_endpoint: String,
+    pushed_authorization_request_endpoint: String,
     scopes_supported: [&'static str; 5],
     response_types_supported: [&'static str; 1],
     response_modes_supported: [&'static str; 2],
@@ -32,6 +33,7 @@ struct Metadata<'a> {
     revocation_endpoint_auth_methods_supported: [&'static str; 3],
     introspection_endpoint_auth_methods_supported: [&'static str; 2],
     code_challenge_methods_supported: [&'static str; 1],
+    dpop_signing_alg_values_supported: Vec<&'static str>,
     claims_supported: [&'static str; 13],
     authorization_response_iss_parameter_supported: bool,
     backchannel_logout_supported: bool,
@@ -39,6 +41,7 @@ struct Metadata<'a> {
     request_parameter_supported: bool,
     request_uri_parameter_supported: bool,
     claims_parameter_supported: bool,
+    require_pushed_authorization_requests: bool,
 }
 
 /// `GET /.well-known/openid-configuration`
@@ -53,6 +56,7 @@ pub(crate) fn discovery(app: &App) -> Response {
         end_session_endpoint: issuer.url("/end-session"),
         revocation_endpoint: issuer.url("/revoke"),
         introspection_endpoint: issuer.url("/introspect"),
+        pushed_authorization_request_endpoint: issuer.url("/par"),
         scopes_supported: SCOPES,
         response_types_supported: ["code"],
         response_modes_supported: ["query", "form_post"],
@@ -77,6 +81,7 @@ pub(crate) fn discovery(app: &App) -> Response {
             "client_secret_post",
         ],
         code_challenge_methods_supported: ["S256"],
+        dpop_signing_alg_values_supported: dpop::algorithms(),
         claims_supported: [
             "iss",
             "sub",
@@ -98,6 +103,8 @@ pub(crate) fn discovery(app: &App) -> Response {
         request_parameter_supported: false,
         request_uri_parameter_supported: false,
         claims_parameter_supported: false,
+        // Each application can require it for itself.
+        require_pushed_authorization_requests: false,
     };
     public(Response::json(&metadata))
 }

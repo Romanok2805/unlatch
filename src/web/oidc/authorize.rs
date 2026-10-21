@@ -6,7 +6,7 @@ use super::super::csrf::{self, Csrf};
 use super::super::i18n::Lang;
 use super::super::layout::{auth_page, error_page, icon};
 use super::super::{App, Failure, session};
-use super::request::{self, AuthRequest, Rejection};
+use super::request::{self, Arrival, AuthRequest, Rejection};
 use super::{CODE_LIFETIME, append_query};
 use crate::crypto::{TokenHash, random_token};
 use crate::form::{Form, encode};
@@ -26,7 +26,7 @@ pub(crate) async fn authorize(
     request: &Request,
     form: &Form,
 ) -> Result<Response, Failure> {
-    match request::check(app, form).await? {
+    match request::check(app, form, Arrival::Browser).await? {
         Ok((auth, _)) => Ok(Response::redirect(continue_url(
             &auth.seal(&app.keys.requests)?,
         ))),
@@ -314,6 +314,7 @@ async fn issue_code(
         auth.nonce.clone(),
     );
     let (challenge, resource) = (auth.code_challenge.clone(), auth.resource.clone());
+    let dpop_jkt = auth.dpop_jkt.clone();
     let expires_at = time::now().saturating_add(CODE_LIFETIME);
     app.db
         .run(move |conn| {
@@ -328,6 +329,7 @@ async fn issue_code(
                     nonce: nonce.as_deref(),
                     code_challenge: &challenge,
                     resource: resource.as_deref(),
+                    dpop_jkt: dpop_jkt.as_deref(),
                     expires_at,
                 },
             )

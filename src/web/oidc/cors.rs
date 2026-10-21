@@ -1,4 +1,5 @@
-//! Cross-origin requests from browser apps to the token, userinfo and revocation endpoints.
+//! Cross-origin requests from browser apps to the token, userinfo, revocation and pushed
+//! authorization request endpoints.
 //!
 //! An origin is allowed if a redirect URI of an enabled application lives there. These endpoints
 //! authenticate with tokens or client credentials, never with cookies, so credentials are not
@@ -43,7 +44,7 @@ pub(crate) async fn preflight(app: &App, request: &Request) -> Result<Response, 
         .header(header::ACCESS_CONTROL_ALLOW_METHODS, "GET, POST")
         .header(
             header::ACCESS_CONTROL_ALLOW_HEADERS,
-            "authorization, content-type",
+            "authorization, content-type, dpop",
         )
         .header(header::ACCESS_CONTROL_MAX_AGE, "600")
         .header(header::VARY, "Origin"))

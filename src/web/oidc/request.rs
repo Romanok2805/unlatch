@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::super::{App, Failure};
-use super::{REQUEST_LIFETIME, SCOPES};
+use super::{PUSHED_REQUEST_LIFETIME, REQUEST_LIFETIME, SCOPES};
 use crate::crypto::{CryptoError, SealingKey};
 use crate::encoding::{base64url, decode_base64url};
 use crate::form::Form;
@@ -15,7 +15,7 @@ const MAX_STATE_LEN: usize = 512;
 const MAX_NONCE_LEN: usize = 256;
 const MAX_LOGIN_HINT_LEN: usize = 100;
 /// The parameters of an authorization request. OAuth forbids repeating any of them.
-const PARAMETERS: [&str; 15] = [
+const PARAMETERS: [&str; 16] = [
     "response_type",
     "client_id",
     "redirect_uri",
@@ -31,6 +31,7 @@ const PARAMETERS: [&str; 15] = [
     "response_mode",
     "request",
     "request_uri",
+    "dpop_jkt",
 ];
 /// Ten years; larger values mean "don't care" and only risk overflow.
 const MAX_MAX_AGE: i64 = 10 * 365 * 24 * 60 * 60;
@@ -54,23 +55,51 @@ pub(crate) struct AuthRequest {
     /// Answer with a posted form instead of query parameters (OAuth 2.0 Form Post Response
     /// Mode).
     pub(crate) form_post: bool,
+    /// The thumbprint of the DPoP key the code may only be redeemed with (RFC 9449 section 10).
+    pub(crate) dpop_jkt: Option<String>,
     pub(crate) issued_at: i64,
 }
 
 const CONTEXT: &[u8] = b"authorization request";
+const PUSHED_CONTEXT: &[u8] = b"pushed authorization request";
+/// What a `request_uri` from `/par` starts with (RFC 9126 section 2.2).
+const REQUEST_URI_PREFIX: &str = "urn:ietf:params:oauth:request_uri:";
 
 impl AuthRequest {
     pub(crate) fn seal(&self, key: &SealingKey) -> Result<String, CryptoError> {
-        let json = serde_json::to_vec(self).map_err(|_| CryptoError)?;
-        Ok(base64url(&key.seal(&json, CONTEXT)?))
+        self.seal_as(key, CONTEXT)
     }
 
     /// The request in a `req` value, unless it was altered or is older than half an hour.
     pub(crate) fn open(text: &str, key: &SealingKey) -> Option<Self> {
-        let json = key.open(&decode_base64url(text)?, CONTEXT)?;
+        Self::open_as(text, key, CONTEXT, REQUEST_LIFETIME)
+    }
+
+    /// The `request_uri` of a pushed request: the request itself, sealed. Nothing is stored, so
+    /// pushing requests that are never used costs nothing. Within its minute it can be used more
+    /// than once, as when a page is reloaded; each use only repeats the same request of the
+    /// same client, and PKCE keeps the codes useless to anyone else.
+    pub(crate) fn request_uri(&self, key: &SealingKey) -> Result<String, CryptoError> {
+        Ok(format!(
+            "{REQUEST_URI_PREFIX}{}",
+            self.seal_as(key, PUSHED_CONTEXT)?
+        ))
+    }
+
+    fn open_pushed(text: &str, key: &SealingKey) -> Option<Self> {
+        Self::open_as(text, key, PUSHED_CONTEXT, PUSHED_REQUEST_LIFETIME)
+    }
+
+    fn seal_as(&self, key: &SealingKey, context: &[u8]) -> Result<String, CryptoError> {
+        let json = serde_json::to_vec(self).map_err(|_| CryptoError)?;
+        Ok(base64url(&key.seal(&json, context)?))
+    }
+
+    fn open_as(text: &str, key: &SealingKey, context: &[u8], lifetime: i64) -> Option<Self> {
+        let json = key.open(&decode_base64url(text)?, context)?;
         let request: Self = serde_json::from_slice(json.expose()).ok()?;
         let age = time::now().saturating_sub(request.issued_at);
-        (0..REQUEST_LIFETIME).contains(&age).then_some(request)
+        (0..lifetime).contains(&age).then_some(request)
     }
 
     pub(crate) fn scopes(&self) -> impl Iterator<Item = &str> {
@@ -112,11 +141,26 @@ pub(crate) enum Rejection {
     },
 }
 
-/// Checks an authorization request from the query or form of `/authorize`.
+/// How an authorization request arrived.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Arrival {
+    /// Through the browser, at `/authorize`.
+    Browser,
+    /// From the client directly, at `/par` (RFC 9126).
+    Pushed,
+}
+
+/// Checks an authorization request: the query or form of `/authorize`, or the body of `/par`.
 pub(crate) async fn check(
     app: &App,
     form: &Form,
+    arrival: Arrival,
 ) -> Result<Result<(AuthRequest, AppRecord), Rejection>, Failure> {
+    if arrival == Arrival::Browser
+        && let Ok(Some(request_uri)) = form.single("request_uri")
+    {
+        return pushed(app, form, request_uri).await;
+    }
     // A repeated parameter is ambiguous, so the request is refused rather than guessed at.
     let (Ok(Some(client_id)), Ok(Some(redirect_uri))) =
         (form.single("client_id"), form.single("redirect_uri"))
@@ -151,6 +195,12 @@ pub(crate) async fn check(
             "the application is disabled",
         )));
     }
+    if arrival == Arrival::Browser && client.require_par {
+        return Ok(Err(reject(
+            "invalid_request",
+            "this application must push its authorization requests",
+        )));
+    }
     let checked = match validate(form, &client) {
         Ok(checked) => checked,
         Err((error, description)) => return Ok(Err(reject(error, description))),
@@ -170,9 +220,33 @@ pub(crate) async fn check(
             .filter(|hint| hint.len() <= MAX_LOGIN_HINT_LEN)
             .map(str::to_owned),
         form_post,
+        dpop_jkt: value("dpop_jkt").map(str::to_owned),
         issued_at: time::now(),
     };
     Ok(Ok((request, client)))
+}
+
+/// A request pushed earlier, which `/authorize` gets as the `request_uri` that `/par` returned.
+/// Nothing else in the query counts, except that `client_id` must name the same client.
+async fn pushed(
+    app: &App,
+    form: &Form,
+    request_uri: &str,
+) -> Result<Result<(AuthRequest, AppRecord), Rejection>, Failure> {
+    let client_id = form.single("client_id").ok().flatten();
+    let Some(auth) = request_uri
+        .strip_prefix(REQUEST_URI_PREFIX)
+        .and_then(|sealed| AuthRequest::open_pushed(sealed, &app.keys.requests))
+        .filter(|auth| client_id == Some(auth.client_id.as_str()))
+    else {
+        return Ok(Err(Rejection::Page));
+    };
+    let lookup = auth.client_id.clone();
+    let client = app
+        .db
+        .run(move |conn| apps::by_client_id(conn, &lookup))
+        .await?;
+    Ok(client.map(|client| (auth, client)).ok_or(Rejection::Page))
 }
 
 /// The parts of a request that needed parsing.
@@ -201,8 +275,12 @@ fn validate(form: &Form, client: &AppRecord) -> Result<Checked, (&'static str, &
     if value("request").is_some() {
         return Err(("request_not_supported", "request objects are not supported"));
     }
+    // Only a pushed request gets here with one, and it can't refer to another (RFC 9126).
     if value("request_uri").is_some() {
-        return Err(("request_uri_not_supported", "request_uri is not supported"));
+        return Err((
+            "invalid_request",
+            "a pushed request can't have a request_uri",
+        ));
     }
     if value("response_type") != Some("code") {
         return Err((
@@ -240,6 +318,14 @@ fn validate(form: &Form, client: &AppRecord) -> Result<Checked, (&'static str, &
         Some(_) => return Err(("invalid_request", "max_age must be a number of seconds")),
     };
     let prompt = parse_prompt(value("prompt").unwrap_or_default())?;
+    if value("dpop_jkt")
+        .is_some_and(|jkt| decode_base64url(jkt).is_none_or(|hash| hash.len() != 32))
+    {
+        return Err((
+            "invalid_request",
+            "dpop_jkt must be a base64url SHA-256 thumbprint",
+        ));
+    }
     if value("resource")
         .is_some_and(|resource| !client.resources.iter().any(|known| known == resource))
     {

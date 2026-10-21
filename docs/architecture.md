@@ -37,7 +37,7 @@ also provides discovery, JWKS, userinfo, token revocation (RFC 7009), introspect
 RP-initiated and back-channel logout, the client credentials grant for services that call each
 other, and the `form_post` response mode. Authorization responses include `iss` (RFC 9207), so a
 client can't be tricked into mixing up responses from two providers. Browser apps may call the
-token, userinfo and revocation endpoints from the origin of one of their redirect URIs.
+token, userinfo, revocation and PAR endpoints from the origin of one of their redirect URIs.
 
 An authorization request is checked, then carried sealed through sign-in and consent instead of
 being stored, so requests that are never finished cost nothing. Each step checks it again against
@@ -52,7 +52,12 @@ Left out on purpose:
   setup doesn't need;
 - front-channel logout, which relies on third-party frames.
 
-Not yet built: pushed authorization requests (RFC 9126) and DPoP (RFC 9449).
+A client can push its authorization request to `/par` first (RFC 9126) and send the browser only a
+reference. Nobody on the way can then read or change the request, and a confidential client proves
+who it is before the user sees anything. An application can be set to accept only pushed requests.
+The reference is the request itself, sealed, so pushing stores nothing. Within its minute it can be
+used more than once, as when a page is reloaded, which only repeats the same request of the same
+client.
 
 A redirect URI must match a registered one character for character. The only exception comes from
 RFC 8252: a native app on the user's machine may use any port on a loopback address. When the client
@@ -65,7 +70,7 @@ without a secret, so for such an app the user is asked every time, even after co
 | Token | Format | Lifetime | If someone uses it twice |
 |---|---|---|---|
 | Authorization code | Random | 60 seconds | Everything issued from it is revoked |
-| Access token | JWT | 5 minutes | Nothing happens; it is a bearer token |
+| Access token | JWT | 5 minutes | Nothing happens, unless it is bound with DPoP |
 | Refresh token | Sealed, not stored | Until the session ends | The grant is revoked |
 | ID token | JWT | 5 minutes | Nothing happens; it only proves sign-in |
 
@@ -77,6 +82,12 @@ Every access token names its audience: the client it was issued to, or an API th
 registered for that client (RFC 8707). A token for one service is useless at another, and refreshing
 never widens the audience. A refresh also checks that the user is still active and still in a group
 allowed to use the client, so removing someone from a group takes effect within five minutes.
+
+With DPoP (RFC 9449) a client binds its tokens to a key it keeps and signs a fresh proof with it for
+every request, so a stolen token is useless without the key. A bound access token names the key in
+`cnf.jkt`, and userinfo accepts it only with a proof. Refresh tokens of public clients are bound as
+well, because without a secret the key is all that tells the client from a thief. A proof is
+accepted once, within a minute of the time it states. An application can be set to require DPoP.
 
 The `sub` of a user is derived from the account with a key, so it is stable but reveals neither the
 order of accounts nor how many there are.

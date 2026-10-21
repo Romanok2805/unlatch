@@ -3,8 +3,8 @@
 use hyper::{StatusCode, header};
 
 use super::super::{App, Failure};
-use super::ACCESS_TOKEN_LIFETIME;
-use super::tokens::{self, Holder, TokenResponse, UserClaims};
+use super::tokens::{self, Access, Holder, TokenResponse, UserClaims};
+use super::{ACCESS_TOKEN_LIFETIME, dpop};
 use crate::crypto::{TokenHash, constant_time_eq, sha256};
 use crate::encoding::{base64url, decode_base64_standard};
 use crate::form::decode_component;
@@ -121,10 +121,24 @@ pub(crate) async fn token(app: &App, request: &Request) -> Result<Response, Fail
         Ok(client) => client,
         Err(response) => return Ok(response),
     };
+    let dpop = match dpop::check(app, request, "/token", None) {
+        Ok(None) if client.require_dpop => Err("this application must use DPoP"),
+        checked => checked,
+    };
+    let dpop = match dpop {
+        Ok(dpop) => dpop,
+        Err(description) => {
+            return Ok(oauth_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_dpop_proof",
+                description,
+            ));
+        }
+    };
     match grant_type {
-        "authorization_code" => authorization_code(app, request, client).await,
-        "refresh_token" => refresh(app, request, client).await,
-        "client_credentials" => client_credentials(app, request, &client),
+        "authorization_code" => authorization_code(app, request, client, dpop).await,
+        "refresh_token" => refresh(app, request, client, dpop).await,
+        "client_credentials" => client_credentials(app, request, &client, dpop.as_deref()),
         _ => Ok(oauth_error(
             StatusCode::BAD_REQUEST,
             "unsupported_grant_type",
@@ -145,10 +159,18 @@ fn valid_verifier(verifier: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~'))
 }
 
+/// The grant of a public client is bound to its DPoP key, if it used one: without a secret, the
+/// key is the only thing that tells the client apart from a thief of its refresh token.
+fn grant_binding(client: &AppRecord, dpop: Option<&str>) -> Option<String> {
+    dpop.filter(|_| client.client_secret_hash.is_none())
+        .map(str::to_owned)
+}
+
 async fn authorization_code(
     app: &App,
     request: &Request,
     client: AppRecord,
+    dpop: Option<String>,
 ) -> Result<Response, Failure> {
     let form = |name| request.form.single(name).ok().flatten().unwrap_or_default();
     let (code, redirect_uri, verifier) = (
@@ -163,6 +185,7 @@ async fn authorization_code(
     let challenge = base64url(&sha256(verifier.as_bytes()));
     let now = time::now();
     let checked = client.clone();
+    let (key, binding) = (dpop.clone(), grant_binding(&client, dpop.as_deref()));
     let outcome = app
         .db
         .run(move |conn| {
@@ -181,6 +204,10 @@ async fn authorization_code(
             {
                 return Ok(Err("the code is invalid"));
             }
+            // A code bound with dpop_jkt is worthless without that key (RFC 9449 section 10).
+            if code.dpop_jkt.is_some() && code.dpop_jkt != key {
+                return Ok(Err("the code is bound to another DPoP key"));
+            }
             let Some(session) = sessions::by_id(conn, code.session, now)? else {
                 return Ok(Err("the session has ended"));
             };
@@ -193,6 +220,7 @@ async fn authorization_code(
                 code.app,
                 &code.scope,
                 code.resource.as_deref(),
+                binding.as_deref(),
             )?;
             grants::mark_redeemed(conn, &hash, grant)?;
             let groups = groups::names_for_user(conn, session.user.id)?;
@@ -203,20 +231,27 @@ async fn authorization_code(
         Ok(found) => found,
         Err(reason) => return Ok(invalid_grant(reason)),
     };
-    let refresh = offline(&code.scope).then_some((grant, 0));
     issue(
         app,
         &client,
         &session,
-        &code.scope,
-        code.resource.as_deref(),
-        code.nonce.as_deref(),
-        groups,
-        refresh,
+        Issuance {
+            scope: &code.scope,
+            resource: code.resource.as_deref(),
+            nonce: code.nonce.as_deref(),
+            groups,
+            refresh: offline(&code.scope).then_some((grant, 0)),
+            dpop: dpop.as_deref(),
+        },
     )
 }
 
-async fn refresh(app: &App, request: &Request, client: AppRecord) -> Result<Response, Failure> {
+async fn refresh(
+    app: &App,
+    request: &Request,
+    client: AppRecord,
+    dpop: Option<String>,
+) -> Result<Response, Failure> {
     let token = request
         .form
         .single("refresh_token")
@@ -235,6 +270,7 @@ async fn refresh(app: &App, request: &Request, client: AppRecord) -> Result<Resp
     });
     let now = time::now();
     let checked = client.clone();
+    let key = dpop.clone();
     let outcome = app
         .db
         .run(move |conn| {
@@ -243,6 +279,11 @@ async fn refresh(app: &App, request: &Request, client: AppRecord) -> Result<Resp
             };
             if grant.app != checked.id {
                 return Ok(Err("the refresh token is invalid"));
+            }
+            // Checked before the generation moves on, so a thief without the key can't use up
+            // the token of the real client.
+            if grant.dpop_jkt.is_some() && grant.dpop_jkt != key {
+                return Ok(Err("the refresh token is bound to another DPoP key"));
             }
             // An older generation means someone kept a copy of a token that was replaced.
             if generation != grant.generation || !grants::advance(conn, grant.id, generation)? {
@@ -284,17 +325,19 @@ async fn refresh(app: &App, request: &Request, client: AppRecord) -> Result<Resp
         None => grant.scope.clone(),
     };
     let next_generation = generation.saturating_add(1);
-    // The new refresh token keeps the scope of the grant, as RFC 6749 section 6 requires.
-    let refresh = offline(&grant.scope).then_some((grant.id, next_generation));
     issue(
         app,
         &client,
         &session,
-        &scope,
-        grant.resource.as_deref(),
-        None,
-        groups,
-        refresh,
+        Issuance {
+            scope: &scope,
+            resource: grant.resource.as_deref(),
+            nonce: None,
+            groups,
+            // The new refresh token keeps the scope of the grant, as RFC 6749 section 6 requires.
+            refresh: offline(&grant.scope).then_some((grant.id, next_generation)),
+            dpop: dpop.as_deref(),
+        },
     )
 }
 
@@ -303,29 +346,47 @@ fn offline(scope: &str) -> bool {
     scope.split(' ').any(|scope| scope == "offline_access")
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "each is a separate input to the response"
-)]
+/// What a token response for a user is issued for.
+struct Issuance<'a> {
+    scope: &'a str,
+    resource: Option<&'a str>,
+    nonce: Option<&'a str>,
+    groups: Vec<String>,
+    /// The grant and generation for a refresh token, if the scope allows one.
+    refresh: Option<(grants::GrantId, i64)>,
+    /// The thumbprint of the DPoP key the access token is bound to.
+    dpop: Option<&'a str>,
+}
+
+/// `Bearer`, or `DPoP` for a token bound to a key (RFC 9449 section 5).
+fn token_type(dpop: Option<&str>) -> &'static str {
+    if dpop.is_some() { "DPoP" } else { "Bearer" }
+}
+
 fn issue(
     app: &App,
     client: &AppRecord,
     session: &ActiveSession,
-    scope: &str,
-    resource: Option<&str>,
-    nonce: Option<&str>,
-    groups: Vec<String>,
-    refresh: Option<(grants::GrantId, i64)>,
+    issuance: Issuance<'_>,
 ) -> Result<Response, Failure> {
     let ring = app.key_ring();
     let now = time::now();
     let client_id = client.client_id.clone().unwrap_or_default();
-    let subject = tokens::subject(app, session.user.id);
-    let holder = Holder::User { subject, session };
-    let access_token = tokens::access_token(app, &ring, now, &client_id, &holder, scope, resource)?;
+    let scope = issuance.scope;
+    let access = Access {
+        client_id: &client_id,
+        holder: Holder::User {
+            subject: tokens::subject(app, session.user.id),
+            session,
+        },
+        scope,
+        resource: issuance.resource,
+        dpop: issuance.dpop,
+    };
+    let access_token = tokens::access_token(app, &ring, now, &access)?;
     let has = |name| scope.split(' ').any(|s| s == name);
     let id_token = if has("openid") {
-        let claims = UserClaims::new(app, &session.user, groups, scope);
+        let claims = UserClaims::new(app, &session.user, issuance.groups, scope);
         Some(tokens::id_token(
             app,
             &ring,
@@ -334,17 +395,18 @@ fn issue(
             client.id_token_alg,
             session,
             &claims,
-            nonce,
+            issuance.nonce,
         )?)
     } else {
         None
     };
-    let refresh_token = refresh
+    let refresh_token = issuance
+        .refresh
         .map(|(grant, generation)| tokens::refresh_token(app, grant, generation))
         .transpose()?;
     Ok(Response::json(&TokenResponse {
         access_token,
-        token_type: "Bearer",
+        token_type: token_type(issuance.dpop),
         expires_in: ACCESS_TOKEN_LIFETIME,
         id_token,
         refresh_token,
@@ -358,6 +420,7 @@ fn client_credentials(
     app: &App,
     request: &Request,
     client: &AppRecord,
+    dpop: Option<&str>,
 ) -> Result<Response, Failure> {
     let resource = request.form.single("resource").ok().flatten();
     if resource.is_some_and(|resource| !client.resources.iter().any(|known| known == resource)) {
@@ -368,18 +431,17 @@ fn client_credentials(
         ));
     }
     let client_id = client.client_id.clone().unwrap_or_default();
-    let access_token = tokens::access_token(
-        app,
-        &app.key_ring(),
-        time::now(),
-        &client_id,
-        &Holder::Client,
-        "",
+    let access = Access {
+        client_id: &client_id,
+        holder: Holder::Client,
+        scope: "",
         resource,
-    )?;
+        dpop,
+    };
+    let access_token = tokens::access_token(app, &app.key_ring(), time::now(), &access)?;
     Ok(Response::json(&TokenResponse {
         access_token,
-        token_type: "Bearer",
+        token_type: token_type(dpop),
         expires_in: ACCESS_TOKEN_LIFETIME,
         id_token: None,
         refresh_token: None,

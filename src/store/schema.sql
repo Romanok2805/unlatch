@@ -61,6 +61,10 @@ CREATE TABLE apps (
     -- Everyone may use it; otherwise only members of app_groups.
     all_users INTEGER NOT NULL DEFAULT 0,
     skip_consent INTEGER NOT NULL DEFAULT 0,
+    -- Authorization requests must be pushed to /par first (RFC 9126).
+    require_par INTEGER NOT NULL DEFAULT 0,
+    -- Tokens must be bound to a key with DPoP (RFC 9449).
+    require_dpop INTEGER NOT NULL DEFAULT 0,
     client_id TEXT UNIQUE,
     -- NULL for public clients, which authenticate with PKCE alone.
     client_secret_hash BLOB,
@@ -120,6 +124,8 @@ CREATE TABLE codes (
     nonce TEXT,
     code_challenge TEXT NOT NULL,
     resource TEXT,
+    -- Thumbprint of the DPoP key the code may only be redeemed with.
+    dpop_jkt TEXT,
     expires_at INTEGER NOT NULL,
     -- Set when the code is redeemed. Redeeming it again revokes this grant.
     grant_id INTEGER REFERENCES grants (id) ON DELETE CASCADE
@@ -134,6 +140,9 @@ CREATE TABLE grants (
     app_id INTEGER NOT NULL REFERENCES apps (id) ON DELETE CASCADE,
     scope TEXT NOT NULL,
     resource TEXT,
+    -- Thumbprint of the DPoP key that refreshing needs: set for public clients, which have no
+    -- secret to prove who is refreshing.
+    dpop_jkt TEXT,
     generation INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL
 ) STRICT;

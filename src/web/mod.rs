@@ -24,6 +24,7 @@ use tokio::sync::Semaphore;
 use self::i18n::Lang;
 use self::layout::error_page;
 use self::limits::Limits;
+use self::oidc::dpop::ProofLog;
 use self::oidc::keys::KeyRing;
 use crate::config::Config;
 use crate::crypto::{CryptoError, MacKey, SealingKey};
@@ -39,6 +40,7 @@ pub(crate) struct App {
     pub(crate) db: Db,
     pub(crate) keys: Keys,
     limits: Limits,
+    dpop_proofs: ProofLog,
     /// Password hashes computed at once. Each takes tens of megabytes for a moment, so this
     /// bounds the memory a burst of sign-ins can use.
     hashing: Semaphore,
@@ -123,6 +125,7 @@ impl App {
             config,
             db,
             limits: Limits::new(),
+            dpop_proofs: ProofLog::new(),
             hashing: Semaphore::new(HASHING_SLOTS),
             branding: RwLock::new(branding),
             signing: RwLock::new(Arc::new(ring)),
@@ -251,9 +254,10 @@ async fn dispatch(app: &App, request: &Request) -> Result<Option<Response>, Fail
         "/authorize" if post => oidc::authorize(app, request, &request.form).await?,
         "/authorize/continue" if get => oidc::resume(app, request).await?,
         "/authorize/continue" if post => oidc::decide(app, request).await?,
-        "/token" | "/userinfo" | "/revoke" if request.method == Method::OPTIONS => {
+        "/token" | "/userinfo" | "/revoke" | "/par" if request.method == Method::OPTIONS => {
             oidc::cors::preflight(app, request).await?
         }
+        "/par" if post => oidc::cors::allow(app, request, oidc::push(app, request).await?).await?,
         "/token" if post => {
             oidc::cors::allow(app, request, oidc::token(app, request).await?).await?
         }

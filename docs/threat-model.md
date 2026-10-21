@@ -48,7 +48,9 @@ arrives over the network is untrusted, including connected applications and outs
 | Another program posing as a native app | [Consent asked every time](architecture.md#openid-connect) |
 | Intercepted or replayed authorization codes | [PKCE, single-use codes](architecture.md#tokens) |
 | Using a token at the wrong service | [Audience, `at+jwt`](architecture.md#tokens) |
-| Stolen refresh token | [Rotation, reuse revokes the grant](architecture.md#tokens) |
+| Stolen refresh token | [Rotation, reuse revokes the grant, DPoP](architecture.md#tokens) |
+| Stolen access token | [Five-minute lifetime, DPoP](architecture.md#tokens) |
+| Reading or changing an authorization request in the browser | [Pushed requests](architecture.md#openid-connect) |
 | Keeping access after removal from a group | [Checks on every refresh](architecture.md#tokens) |
 | Stolen signing key | [Rotation](architecture.md#tokens), [encryption at rest](architecture.md#storage) |
 | Stolen database or backup | [Hashes and encryption](architecture.md#storage) |

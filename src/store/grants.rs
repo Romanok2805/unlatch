@@ -19,6 +19,7 @@ pub(crate) struct NewCode<'a> {
     pub(crate) nonce: Option<&'a str>,
     pub(crate) code_challenge: &'a str,
     pub(crate) resource: Option<&'a str>,
+    pub(crate) dpop_jkt: Option<&'a str>,
     pub(crate) expires_at: i64,
 }
 
@@ -31,8 +32,8 @@ pub(crate) fn create_code(conn: &Connection, code: &NewCode<'_>) -> Result<(), D
     )?;
     conn.execute(
         "INSERT INTO codes (code_hash, app_id, session_id, redirect_uri, scope, nonce,
-                            code_challenge, resource, expires_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                            code_challenge, resource, dpop_jkt, expires_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             code.hash.0,
             code.app.0,
@@ -42,6 +43,7 @@ pub(crate) fn create_code(conn: &Connection, code: &NewCode<'_>) -> Result<(), D
             code.nonce,
             code.code_challenge,
             code.resource,
+            code.dpop_jkt,
             code.expires_at
         ],
     )?;
@@ -56,6 +58,7 @@ pub(crate) struct Code {
     pub(crate) nonce: Option<String>,
     pub(crate) challenge: String,
     pub(crate) resource: Option<String>,
+    pub(crate) dpop_jkt: Option<String>,
     pub(crate) expires_at: i64,
     /// Set once the code was redeemed.
     pub(crate) grant: Option<GrantId>,
@@ -65,7 +68,7 @@ pub(crate) fn find_code(conn: &Connection, hash: &TokenHash) -> Result<Option<Co
     Ok(conn
         .query_row(
             "SELECT app_id, session_id, redirect_uri, scope, nonce, code_challenge, resource,
-                    expires_at, grant_id
+                    expires_at, grant_id, dpop_jkt
              FROM codes WHERE code_hash = ?1",
             [hash.0],
             |row| {
@@ -79,6 +82,7 @@ pub(crate) fn find_code(conn: &Connection, hash: &TokenHash) -> Result<Option<Co
                     resource: row.get(6)?,
                     expires_at: row.get(7)?,
                     grant: row.get::<_, Option<i64>>(8)?.map(GrantId),
+                    dpop_jkt: row.get(9)?,
                 })
             },
         )
@@ -104,6 +108,8 @@ pub(crate) struct Grant {
     pub(crate) app: AppId,
     pub(crate) scope: String,
     pub(crate) resource: Option<String>,
+    /// The DPoP key refreshing needs, if the grant is bound to one.
+    pub(crate) dpop_jkt: Option<String>,
     pub(crate) generation: i64,
 }
 
@@ -114,15 +120,23 @@ pub(crate) fn create(
     app: AppId,
     scope: &str,
     resource: Option<&str>,
+    dpop_jkt: Option<&str>,
 ) -> Result<GrantId, DbError> {
     conn.execute(
         "INSERT OR IGNORE INTO session_apps (session_id, app_id) VALUES (?1, ?2)",
         params![session.0, app.0],
     )?;
     conn.execute(
-        "INSERT INTO grants (session_id, app_id, scope, resource, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![session.0, app.0, scope, resource, crate::time::now()],
+        "INSERT INTO grants (session_id, app_id, scope, resource, dpop_jkt, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            session.0,
+            app.0,
+            scope,
+            resource,
+            dpop_jkt,
+            crate::time::now()
+        ],
     )?;
     Ok(GrantId(conn.last_insert_rowid()))
 }
@@ -130,7 +144,8 @@ pub(crate) fn create(
 pub(crate) fn find(conn: &Connection, id: GrantId) -> Result<Option<Grant>, DbError> {
     Ok(conn
         .query_row(
-            "SELECT id, session_id, app_id, scope, resource, generation FROM grants WHERE id = ?1",
+            "SELECT id, session_id, app_id, scope, resource, generation, dpop_jkt
+             FROM grants WHERE id = ?1",
             [id.0],
             |row| {
                 Ok(Grant {
@@ -140,6 +155,7 @@ pub(crate) fn find(conn: &Connection, id: GrantId) -> Result<Option<Grant>, DbEr
                     scope: row.get(3)?,
                     resource: row.get(4)?,
                     generation: row.get(5)?,
+                    dpop_jkt: row.get(6)?,
                 })
             },
         )
