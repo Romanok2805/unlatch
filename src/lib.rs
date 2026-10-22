@@ -37,7 +37,7 @@ Usage: unlatch [command]
 
 Commands:
   serve          Run the server (the default). Configured by environment variables;
-                 see docs/configuration.md.
+                 see https://unlatch.dev/docs/configuration/.
   generate-key   Print a new master key for UNLATCH_KEY_FILE.
   version        Print the version.
   help           Show this message.

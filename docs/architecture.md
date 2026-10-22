@@ -217,10 +217,10 @@ Request and header sizes, the number of connections and every timeout are limite
 
 ## Memory
 
-Measured with the release build on Windows: the binary is 7 MB, and the server holds about 7 MB of
-memory at rest. With 20 clients asking for the sign-in page at once, about 4,000 requests a second,
-it stays under 8 MB. Password checks raise it to about 46 MB for a moment, two hashes of 19 MiB
-each, and it drops back when they finish.
+Measured with the x86-64 Linux release: the binary is 8.8 MB, and the server holds about 6 MB of
+memory at rest. With 20 clients asking for the sign-in page at once, it stays under 8 MB. Password
+checks add up to 38 MiB for a moment, two hashes of 19 MiB each, and it drops back when they
+finish.
 
 The async runtime uses two worker threads. Static files are built into the binary and cached by
 browsers under addresses that include a hash of their contents.

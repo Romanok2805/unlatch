@@ -58,7 +58,34 @@ device is asked every time, because another program could pose as it.
   or DPoP-bound tokens ([OpenID Connect](architecture.md#openid-connect)).
 - *Require PKCE*: turn it off only for an older application with a secret that can't use PKCE.
 
-## Example: Grafana
+## Examples
+
+### Forgejo
+
+The redirect URI is `https://git.example.com/user/oauth2/unlatch/callback`, where `unlatch` is
+the name of the authentication source. Add the source in *Site administration*,
+*Authentication sources*, with the provider *OpenID Connect*, or with:
+
+```sh
+forgejo admin auth add-oauth --name unlatch --provider openidConnect \
+  --key forgejo --secret "the secret from Unlatch" \
+  --auto-discover-url https://login.example.com/.well-known/openid-configuration \
+  --scopes profile,email,groups \
+  --group-claim-name groups --admin-group admins
+```
+
+The last line makes members of the group `admins` administrators in Forgejo. Without an account
+of their own, people choose on first sign-in between registering and linking an existing account;
+to create accounts for them instead, set this in `app.ini`:
+
+```ini
+[oauth2_client]
+ENABLE_AUTO_REGISTRATION = true
+```
+
+Gitea is set up the same way, but doesn't use PKCE: turn off *Require PKCE* for it.
+
+### Grafana
 
 The redirect URI is `https://grafana.example.com/login/generic_oauth`. In `grafana.ini`:
 
@@ -79,3 +106,92 @@ role_attribute_path = contains(groups[*], 'admins') && 'Admin' || 'Viewer'
 
 The last line makes members of the group `admins` administrators in Grafana
 and everyone else viewers.
+
+### Immich
+
+Immich has to be served over https. Its redirect URIs are:
+
+```text
+https://photos.example.com/auth/login
+https://photos.example.com/user-settings
+https://photos.example.com/api/oauth/mobile-redirect
+```
+
+In *Administration*, *Settings*, *Authentication Settings*, *OAuth*:
+
+| Setting | Value |
+|---|---|
+| `issuer_url` | `https://login.example.com` |
+| `client_id` | `immich` |
+| `client_secret` | the secret from Unlatch |
+| `scope` | `openid email profile groups` |
+| Role Claim | `groups` |
+| Mobile redirect URI override | on, with `https://photos.example.com/api/oauth/mobile-redirect` |
+
+Immich creates accounts only for users with an email address. Members of the group `admin` become
+Immich administrators. The mobile app needs the override because Unlatch doesn't accept the
+address it uses otherwise, `app.immich:///oauth-callback`.
+
+### Nextcloud
+
+Install the app *OpenID Connect user backend*. Its redirect URI is
+`https://cloud.example.com/apps/user_oidc/code`, with `/index.php` before `/apps` if Nextcloud has
+no pretty URLs; the app's settings page shows the exact one. Then:
+
+```sh
+occ user_oidc:provider Unlatch \
+  --clientid=nextcloud \
+  --clientsecret="the secret from Unlatch" \
+  --discoveryuri=https://login.example.com/.well-known/openid-configuration \
+  --scope="openid profile email groups" \
+  --send-id-token-hint=1
+```
+
+Add `https://cloud.example.com/` under *Addresses after sign-out*: Nextcloud sends people there when
+they sign out. Add `--group-provisioning=1` to copy their groups from Unlatch as well. To skip
+Nextcloud's own login form and go straight to Unlatch:
+
+```sh
+occ config:app:set --type=string --value=0 user_oidc allow_multiple_user_backends
+```
+
+### Proxmox VE
+
+The redirect URI is the address of the web interface, such as `https://pve.example.com:8006`,
+without a slash at the end; add one for each address people open. Then:
+
+```sh
+pveum realm add unlatch --type openid --issuer-url https://login.example.com \
+  --client-id proxmox --client-key "the secret from Unlatch" \
+  --username-claim username --autocreate 1 \
+  --scopes "email profile groups" --groups-claim groups
+```
+
+People get accounts such as `anna@unlatch`; the realm's username claim can't be changed later.
+The accounts have no permissions of their own. Proxmox VE 8.4 and later adds people to its groups
+named after their Unlatch groups with the realm appended, if such groups exist. This makes
+members of `admins` administrators:
+
+```sh
+pveum group add admins-unlatch
+pveum acl modify / --groups admins-unlatch --roles Administrator
+```
+
+### Vaultwarden
+
+Vaultwarden supports this from version 1.35. The redirect URI is
+`https://vault.example.com/identity/connect/oidc-signin`. In its environment:
+
+```ini
+DOMAIN=https://vault.example.com
+SSO_ENABLED=true
+SSO_AUTHORITY=https://login.example.com
+SSO_CLIENT_ID=vaultwarden
+SSO_CLIENT_SECRET=the secret from Unlatch
+SSO_AUTH_ONLY_NOT_SESSION=true
+```
+
+Vaultwarden needs an email address that is marked as verified on the user's page. The last line
+makes it keep sessions of its own after sign-in, because Unlatch's access tokens last five minutes,
+too short for Bitwarden apps; signing out of Unlatch then doesn't sign people out of Vaultwarden.
+People still unlock the vault with their master password.

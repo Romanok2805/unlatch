@@ -5,8 +5,8 @@ for x86-64 and ARM64 and [a container image](#in-a-container). The release lists
 sums, and `gh attestation verify` confirms that a file or image was built by the release workflow:
 
 ```sh
-gh attestation verify unlatch-v0.1.0-x86_64-linux.tar.gz --repo Romanok2805/unlatch
-gh attestation verify oci://ghcr.io/romanok2805/unlatch:v0.1.0 --repo Romanok2805/unlatch
+gh attestation verify unlatch-v*-x86_64-linux.tar.gz --repo Romanok2805/unlatch
+gh attestation verify oci://ghcr.io/romanok2805/unlatch:latest --repo Romanok2805/unlatch
 ```
 
 ## The master key
@@ -69,22 +69,58 @@ systemd reads the key, which can stay readable by root only, and hands it to the
 
 The image holds nothing but the binary and runs as user 65532. It listens on port 8080 and keeps
 its database in the volume `/data`. Releases publish it as `ghcr.io/romanok2805/unlatch`, tagged
-with the version and `latest`; `docker build -t unlatch .` builds the same from source. Give it the
-key as a read-only file that user can read:
+with the version and `latest`; `docker build -t unlatch .` builds the same from source.
+
+The image also makes the master key. Give the file to user 65532, which reads it:
 
 ```sh
-chown 65532 /etc/unlatch/key
-docker run -d --name unlatch -p 127.0.0.1:8080:8080 \
-  -e UNLATCH_ISSUER=https://login.example.com \
-  -e UNLATCH_TRUSTED_PROXIES=172.16.0.0/12 \
-  -e UNLATCH_KEY_FILE=/run/secrets/unlatch-key \
-  -v /etc/unlatch/key:/run/secrets/unlatch-key:ro \
-  -v unlatch:/data \
-  ghcr.io/romanok2805/unlatch
+(umask 077; docker run --rm ghcr.io/romanok2805/unlatch generate-key > key)
+sudo chown 65532 key
 ```
 
-`UNLATCH_TRUSTED_PROXIES` names the network the reverse proxy connects from; the example covers
-Docker's default networks.
+This `compose.yaml` runs Unlatch behind Caddy, which gets the certificate:
+
+```yaml
+services:
+  unlatch:
+    image: ghcr.io/romanok2805/unlatch
+    restart: unless-stopped
+    environment:
+      UNLATCH_ISSUER: https://login.example.com
+      UNLATCH_TRUSTED_PROXIES: 172.16.0.0/12, 192.168.0.0/16
+      UNLATCH_KEY_FILE: /run/secrets/unlatch-key
+    volumes:
+      - ./key:/run/secrets/unlatch-key:ro
+      - unlatch:/data
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - 80:80
+      - 443:443
+      - 443:443/udp
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy:/data
+
+volumes:
+  unlatch:
+  caddy:
+```
+
+And this `Caddyfile` next to it:
+
+```caddy
+login.example.com {
+	reverse_proxy unlatch:8080
+}
+```
+
+`docker compose up -d` starts both, and `docker compose logs unlatch` shows the link that creates
+the first administrator. `UNLATCH_TRUSTED_PROXIES` names the networks the reverse proxy connects
+from; the example covers Docker's default networks. To use a reverse proxy you already have instead
+of Caddy, drop the `caddy` service and give `unlatch` the line `ports: ["127.0.0.1:8080:8080"]`.
 
 ## Behind a reverse proxy
 

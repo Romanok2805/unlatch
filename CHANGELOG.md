@@ -5,7 +5,7 @@
 - The copy of the database that Unlatch saves before a migration is readable only by its owner,
   like the database itself.
 
-## 0.2.0
+## 0.2.0 - 2026-10-22
 
 - Buttons for GitHub sign-in show the GitHub mark, as Google's show Google's.
 - TOTP secrets that use SHA-256, for accounts moved from another provider. The database
@@ -17,7 +17,7 @@
 - On the consent page, each permission stands next to its icon again.
 - Buttons that need scripts stay hidden when scripts are off.
 
-## 0.1.0
+## 0.1.0 - 2026-10-22
 
 The first release.
 

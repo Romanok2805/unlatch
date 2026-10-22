@@ -8,7 +8,8 @@
 
 Unlatch is a single sign-on server you host yourself. It speaks OpenID Connect, so people sign in
 once and can then use every service you connect to it, such as Grafana, Forgejo or Nextcloud. It is
-written in Rust with few dependencies and runs as one binary with one SQLite file.
+written in Rust with few dependencies and runs as one 9 MB binary with one SQLite file, in
+[about 6 MB of memory](docs/architecture.md#memory).
 
 Unlatch is young: it hasn't been audited or certified yet.
 
@@ -35,16 +36,26 @@ To try it on this machine:
 UNLATCH_ISSUER=http://localhost:8080 UNLATCH_KEY_FILE=key unlatch
 ```
 
+Or with Docker:
+
+```sh
+docker run --rm ghcr.io/romanok2805/unlatch generate-key > key
+docker run --rm -p 127.0.0.1:8080:8080 -e UNLATCH_ISSUER=http://localhost:8080 \
+  -e UNLATCH_KEY_FILE=/key -v "$PWD/key:/key:ro" ghcr.io/romanok2805/unlatch
+```
+
 Then open the link from the log, which creates the first administrator.
 The administrator then [connects applications](docs/applications.md)
 and [invites people](docs/users.md) in the web interface.
+[Running Unlatch](docs/running.md) shows how to run it on a server, with systemd or Docker Compose.
 
 ## Documentation
 
 - [Running Unlatch](docs/running.md): releases, systemd, containers, reverse proxy and backups.
 - [Configuration](docs/configuration.md): every setting.
 - [Connecting applications](docs/applications.md): OpenID Connect settings, what applications
-  learn about users, and an example.
+  learn about users, and examples for Forgejo, Grafana, Immich, Nextcloud, Proxmox VE and
+  Vaultwarden.
 - [Users and groups](docs/users.md): invitations, lost passwords and access by group.
 - [Sign-in providers](docs/providers.md): signing in with Google, GitHub and others.
 - [Forward authentication](docs/forward-auth.md): protecting services without OpenID Connect.
