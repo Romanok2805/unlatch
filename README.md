@@ -1,6 +1,6 @@
 # Unlatch
 
-[![CI](https://github.com/Romanok2805/unlatch/actions/workflows/ci.yml/badge.svg)](https://github.com/Romanok2805/unlatch/actions/workflows/ci.yml)
+[![CI](https://github.com/Romanok2805/unlatch/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Romanok2805/unlatch/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/unlatch)](https://crates.io/crates/unlatch)
 [![Rust](https://img.shields.io/crates/msrv/unlatch)](https://crates.io/crates/unlatch)
 [![Documentation](https://img.shields.io/badge/docs-unlatch.dev-2d6a5f)](https://unlatch.dev)
