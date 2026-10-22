@@ -81,6 +81,7 @@ pub(crate) async fn start(
         .collect();
     let user_id = signed_in.user();
     let amr = signed_in.amr();
+    let verified_at = if signed_in.verified() { now } else { 0 };
     app.db
         .run(move |conn| {
             sessions::create(
@@ -91,6 +92,7 @@ pub(crate) async fn start(
                     user_id,
                     amr,
                     now,
+                    verified_at,
                     expires_at: now.saturating_add(IDLE_LIFETIME),
                     ip: &ip,
                     user_agent: &user_agent,

@@ -15,6 +15,8 @@ pub(crate) struct NewSession<'a> {
     pub(crate) user_id: UserId,
     pub(crate) amr: &'a str,
     pub(crate) now: i64,
+    /// 0 when a code the account has wasn't entered.
+    pub(crate) verified_at: i64,
     pub(crate) expires_at: i64,
     pub(crate) ip: &'a str,
     pub(crate) user_agent: &'a str,
@@ -24,13 +26,14 @@ pub(crate) fn create(conn: &Connection, session: &NewSession<'_>) -> Result<Sess
     conn.execute(
         "INSERT INTO sessions (token_hash, public_id, user_id, amr, auth_time, verified_at,
                                last_seen_at, expires_at, ip, user_agent)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?5, ?6, ?7, ?8)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?5, ?7, ?8, ?9)",
         params![
             session.token_hash.0,
             session.public_id,
             session.user_id.0,
             session.amr,
             session.now,
+            session.verified_at,
             session.expires_at,
             session.ip,
             session.user_agent

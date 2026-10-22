@@ -37,6 +37,11 @@ signs in with their password once, opens their account page and links the outsid
 *Sign-in providers*; from then on the button signs them in. With two-factor sign-in turned on,
 Unlatch still asks for a code.
 
+*Skip the two-factor code* lets people in with the button alone, so the outside account is all
+it takes. Check it only if the accounts there have two-factor sign-in of their own, as Google and
+GitHub can require. Administration still asks for the code, and adding a passkey needs a sign-in
+with it.
+
 An outside account that isn't linked to anyone gets in only if Unlatch can create an account for
 it, as below.
 

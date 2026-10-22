@@ -39,6 +39,8 @@ pub(crate) struct Provider {
     /// Email domains whose verified users get an account on first sign-in.
     pub(crate) auto_create_domains: Vec<String>,
     pub(crate) enabled: bool,
+    /// Accounts with two-factor sign-in aren't asked for their code after signing in here.
+    pub(crate) skip_code: bool,
 }
 
 /// Google is an OpenID Connect provider like any other, except for its logo and its `hd` claim.
@@ -50,8 +52,8 @@ impl Provider {
     }
 }
 
-const COLUMNS: &str =
-    "id, slug, name, kind, issuer, client_id, client_secret, auto_create_domains, enabled";
+const COLUMNS: &str = "id, slug, name, kind, issuer, client_id, client_secret, \
+                       auto_create_domains, enabled, skip_code";
 
 fn from_row(row: &Row<'_>) -> rusqlite::Result<Provider> {
     let kind: String = row.get(3)?;
@@ -70,6 +72,7 @@ fn from_row(row: &Row<'_>) -> rusqlite::Result<Provider> {
         client_secret: row.get(6)?,
         auto_create_domains: domains.split_whitespace().map(str::to_owned).collect(),
         enabled: row.get(8)?,
+        skip_code: row.get(9)?,
     })
 }
 
@@ -112,25 +115,8 @@ pub(crate) fn save(
         None => {
             conn.execute(
                 "INSERT INTO providers (slug, name, kind, issuer, client_id, client_secret,
-                                        auto_create_domains, enabled)
-                 VALUES (?1, ?2, ?3, ?4, ?5, X'', ?6, ?7)",
-                params![
-                    provider.slug,
-                    provider.name,
-                    provider.kind.name(),
-                    provider.issuer,
-                    provider.client_id,
-                    domains,
-                    provider.enabled
-                ],
-            )?;
-            Ok(ProviderId(conn.last_insert_rowid()))
-        }
-        Some(id) => {
-            conn.execute(
-                "UPDATE providers SET slug = ?1, name = ?2, kind = ?3, issuer = ?4, client_id = ?5,
-                        auto_create_domains = ?6, enabled = ?7
-                 WHERE id = ?8",
+                                        auto_create_domains, enabled, skip_code)
+                 VALUES (?1, ?2, ?3, ?4, ?5, X'', ?6, ?7, ?8)",
                 params![
                     provider.slug,
                     provider.name,
@@ -139,6 +125,25 @@ pub(crate) fn save(
                     provider.client_id,
                     domains,
                     provider.enabled,
+                    provider.skip_code
+                ],
+            )?;
+            Ok(ProviderId(conn.last_insert_rowid()))
+        }
+        Some(id) => {
+            conn.execute(
+                "UPDATE providers SET slug = ?1, name = ?2, kind = ?3, issuer = ?4, client_id = ?5,
+                        auto_create_domains = ?6, enabled = ?7, skip_code = ?8
+                 WHERE id = ?9",
+                params![
+                    provider.slug,
+                    provider.name,
+                    provider.kind.name(),
+                    provider.issuer,
+                    provider.client_id,
+                    domains,
+                    provider.enabled,
+                    provider.skip_code,
                     id.0
                 ],
             )?;
@@ -213,4 +218,36 @@ pub(crate) fn linked_providers(
         .query_map([user.0], |row| row.get(0).map(ProviderId))?
         .collect::<Result<_, _>>()?;
     Ok(ids)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::Db;
+
+    #[tokio::test]
+    async fn providers_ask_for_the_code_unless_saved_otherwise() {
+        let db = Db::open_in_memory().unwrap();
+        db.run(|conn| {
+            // A provider from before schema version 4.
+            conn.execute(
+                "INSERT INTO providers (slug, name, kind, client_id, client_secret)
+                 VALUES ('old', 'Old', 'github', 'x', X'')",
+                [],
+            )?;
+            let mut provider = by_slug(conn, "old")?.unwrap();
+            assert!(!provider.skip_code);
+
+            provider.skip_code = true;
+            save(conn, Some(provider.id), &provider)?;
+            assert!(by_slug(conn, "old")?.unwrap().skip_code);
+
+            provider.slug = "new".to_owned();
+            let id = save(conn, None, &provider)?;
+            assert!(by_id(conn, id)?.unwrap().skip_code);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    }
 }

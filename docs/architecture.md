@@ -136,7 +136,10 @@ accounts on the first outside sign-in is off by default. When the administrator 
 domains for it, the provider must confirm the address and its domain must be on the list. With
 Google the account must also belong to that domain's Google Workspace, because a personal Google
 account can have a confirmed address at any domain. An account with TOTP still asks for a code
-after an outside sign-in.
+after an outside sign-in, unless the administrator trusts the provider to check a second factor
+itself. Unlatch can't see whether it did, so such a session counts as one without the code: its
+`amr` is only `fed`, administration asks for the code, and passkeys, which are enough for
+administration, can't be added from it.
 
 Unlatch doesn't send email. The administrator gives people one-time links to join or to reset their
 password, and users who lose their authenticator get in with a recovery code.

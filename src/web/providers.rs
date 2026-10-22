@@ -595,13 +595,13 @@ async fn resolve(
     if let Some(user_id) = linked {
         let user = app.db.run(move |conn| users::by_id(conn, user_id)).await?;
         return match user.filter(|user| !user.disabled) {
-            Some(user) => after_provider(app, request, user, &flow.next).await,
+            Some(user) => after_provider(app, request, user, provider.skip_code, &flow.next).await,
             None => Ok(message(app, request, text.provider_failed)),
         };
     }
 
     if let Some(user) = create_account(app, request, provider, &identity).await? {
-        return after_provider(app, request, user, &flow.next).await;
+        return after_provider(app, request, user, provider.skip_code, &flow.next).await;
     }
     info!(
         "{} sign-in by an unlinked account ({})",

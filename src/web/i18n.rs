@@ -160,6 +160,7 @@ pub(crate) struct Text {
     pub(crate) last_used: &'static str,
     pub(crate) sign_in_again: &'static str,
     pub(crate) tip_sign_in_again: &'static str,
+    pub(crate) tip_sign_in_with_code: &'static str,
     pub(crate) setup_title: &'static str,
     pub(crate) display_name: &'static str,
     pub(crate) create: &'static str,
@@ -315,6 +316,8 @@ pub(crate) struct Text {
     pub(crate) auto_create_note: &'static str,
     pub(crate) domains_invalid: &'static str,
     pub(crate) callback_note: &'static str,
+    pub(crate) skip_code: &'static str,
+    pub(crate) tip_skip_code: &'static str,
 }
 
 static EN: Text = Text {
@@ -376,6 +379,7 @@ static EN: Text = Text {
     last_used: "Last used",
     sign_in_again: "Sign in again",
     tip_sign_in_again: "Adding and removing passkeys needs a recent sign-in",
+    tip_sign_in_with_code: "Adding and removing passkeys needs a sign-in with your code",
     setup_title: "First administrator",
     display_name: "Name",
     create: "Create",
@@ -531,6 +535,8 @@ static EN: Text = Text {
     auto_create_note: "Email domains, separated by spaces, whose verified users get an account on first sign-in. Empty: nobody.",
     domains_invalid: "Domains must be host names separated by spaces",
     callback_note: "Register this address at the provider",
+    skip_code: "Skip the two-factor code",
+    tip_skip_code: "Only if accounts there have two-factor sign-in. Administration still asks for the code.",
 };
 
 static RU: Text = Text {
@@ -592,6 +598,7 @@ static RU: Text = Text {
     last_used: "Последний вход",
     sign_in_again: "Войти ещё раз",
     tip_sign_in_again: "Чтобы добавлять и удалять ключи, нужен недавний вход",
+    tip_sign_in_with_code: "Чтобы добавлять и удалять ключи, нужен вход с кодом",
     setup_title: "Первый администратор",
     display_name: "Имя",
     create: "Создать",
@@ -747,4 +754,6 @@ static RU: Text = Text {
     auto_create_note: "Почтовые домены через пробел: их подтверждённые пользователи получат аккаунт при первом входе. Пусто — никто.",
     domains_invalid: "Домены — имена хостов через пробел",
     callback_note: "Зарегистрируйте этот адрес у провайдера",
+    skip_code: "Не спрашивать код двухфакторного входа",
+    tip_skip_code: "Только если там у аккаунтов есть двухфакторный вход. Администрирование всё равно спросит код.",
 };

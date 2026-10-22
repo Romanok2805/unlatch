@@ -4,6 +4,9 @@
 
 - The copy of the database that Unlatch saves before a migration is readable only by its owner,
   like the database itself.
+- A sign-in provider can skip the two-factor code, for providers whose accounts have two-factor
+  sign-in of their own. Administration still asks for it. The database moves to schema
+  version 4.
 
 ## 0.2.0 - 2026-10-22
 

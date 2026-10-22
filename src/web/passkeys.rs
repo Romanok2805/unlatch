@@ -358,13 +358,19 @@ async fn passkeys_page(
     });
     let full = i64::try_from(list.len()).unwrap_or(i64::MAX) >= MAX_PASSKEYS;
     if !recent {
+        // A provider that skips the code leaves the session without one; see after_provider.
+        let tip = if session.verified_at == 0 {
+            text.tip_sign_in_with_code
+        } else {
+            text.tip_sign_in_again
+        };
         html!(
             content,
             "<div class=\"has-tip\"><a class=\"button primary block\" ",
             "href=\"/login?force=1&amp;next=/account/passkeys\" aria-describedby=\"tip-again\">",
             { text.sign_in_again },
             "</a>",
-            { tooltip("tip-again", text.tip_sign_in_again) },
+            { tooltip("tip-again", tip) },
             "</div>"
         );
     } else if full {

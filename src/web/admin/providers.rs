@@ -77,6 +77,7 @@ struct Draft {
     client_id: String,
     domains: String,
     enabled: bool,
+    skip_code: bool,
 }
 
 impl Draft {
@@ -90,6 +91,7 @@ impl Draft {
             client_id: String::new(),
             domains: String::new(),
             enabled: true,
+            skip_code: false,
         }
     }
 
@@ -102,6 +104,7 @@ impl Draft {
             client_id: provider.client_id.clone(),
             domains: provider.auto_create_domains.join(" "),
             enabled: provider.enabled,
+            skip_code: provider.skip_code,
         }
     }
 
@@ -118,6 +121,7 @@ impl Draft {
             client_id: field(request, "client_id").to_owned(),
             domains: field(request, "domains").to_ascii_lowercase(),
             enabled: checked(request, "enabled"),
+            skip_code: checked(request, "skip_code"),
         }
     }
 
@@ -162,6 +166,7 @@ impl Draft {
             client_secret: Vec::new(),
             auto_create_domains: domains,
             enabled: self.enabled,
+            skip_code: self.skip_code,
         })
     }
 }
@@ -314,6 +319,14 @@ fn form(
         "1",
         draft.enabled,
         None,
+    );
+    checkbox(
+        &mut content,
+        text.skip_code,
+        "skip_code",
+        "1",
+        draft.skip_code,
+        Some(text.tip_skip_code),
     );
     html!(
         content,

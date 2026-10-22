@@ -44,11 +44,13 @@ pub(crate) struct FirstFactor {
     federated: bool,
 }
 
-/// Someone who passed every factor their account has.
+/// Someone who passed every factor their account has, or every one a trusted provider leaves.
 pub(crate) struct SignedIn {
     user: UserId,
     username: String,
     amr: &'static str,
+    /// The account's code, if it has one, was entered, or a passkey took its place.
+    verified: bool,
 }
 
 impl SignedIn {
@@ -63,12 +65,18 @@ impl SignedIn {
         self.amr
     }
 
+    /// Whether the session may count as a recent second factor, for administration and passkeys.
+    pub(crate) fn verified(&self) -> bool {
+        self.verified
+    }
+
     /// The administrator who just created the first account with the setup token.
     pub(super) fn first_administrator(user: &User) -> Self {
         Self {
             user: user.id,
             username: user.username.clone(),
             amr: "pwd",
+            verified: true,
         }
     }
 }
@@ -291,6 +299,7 @@ pub(super) async fn submit(app: &App, request: &Request) -> Result<Response, Fai
             user: user.id,
             username: user.username,
             amr: "pwd",
+            verified: true,
         };
         return finish(app, request, signed_in, &next).await;
     }
@@ -330,23 +339,31 @@ pub(super) async fn passkey_submit(app: &App, request: &Request) -> Result<Respo
         user: user.id,
         username: user.username,
         amr: "pop mfa",
+        verified: true,
     };
     finish(app, request, signed_in, &next).await
 }
 
 /// Continues a sign-in after an outside provider vouched for `user`: with the code step if the
-/// account has two-factor sign-in, which a provider doesn't replace, or else straight in.
+/// account has two-factor sign-in, or else straight in.
+///
+/// A provider doesn't replace the code unless the administrator trusts it to (`skip_code`).
+/// Such a session still hasn't confirmed the code, so administration asks for it, and passkeys,
+/// which are enough for administration, can't be added from it.
 pub(super) async fn after_provider(
     app: &App,
     request: &Request,
     user: User,
+    skip_code: bool,
     next: &str,
 ) -> Result<Response, Failure> {
-    if user.totp_secret.is_none() {
+    let has_code = user.totp_secret.is_some();
+    if !has_code || skip_code {
         let signed_in = SignedIn {
             user: user.id,
             username: user.username,
             amr: "fed",
+            verified: !has_code,
         };
         return finish(app, request, signed_in, next).await;
     }
@@ -588,6 +605,7 @@ pub(super) async fn second_step_submit(
         } else {
             "pwd otp"
         },
+        verified: true,
     };
     finish(app, request, signed_in, &next).await
 }

@@ -27,10 +27,11 @@ use tokio::sync::{mpsc, oneshot};
 const QUEUE_LEN: usize = 256;
 
 /// Each entry upgrades the schema by one version. Entries are never edited after a release.
-const MIGRATIONS: [&str; 3] = [
+const MIGRATIONS: [&str; 4] = [
     include_str!("schema.sql"),
     include_str!("v2.sql"),
     include_str!("v3.sql"),
+    include_str!("v4.sql"),
 ];
 
 type Job = Box<dyn FnOnce(&mut Connection) + Send>;
