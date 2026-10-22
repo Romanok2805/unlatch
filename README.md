@@ -11,7 +11,8 @@ once and can then use every service you connect to it, such as Grafana, Forgejo 
 written in Rust with few dependencies and runs as one 9 MB binary with one SQLite file, in
 [about 6 MB of memory](docs/architecture.md#memory).
 
-Unlatch is young: it hasn't been audited or certified yet.
+Unlatch is young: it hasn't been audited or certified yet. [The comparison](docs/comparison.md)
+shows how it differs from Authelia, authentik, Kanidm, Pocket ID and Rauthy.
 
 ![The sign-in page](docs/images/signin.png)
 
@@ -59,6 +60,7 @@ and [invites people](docs/users.md) in the web interface.
 - [Users and groups](docs/users.md): invitations, lost passwords and access by group.
 - [Sign-in providers](docs/providers.md): signing in with Google, GitHub and others.
 - [Forward authentication](docs/forward-auth.md): protecting services without OpenID Connect.
+- [Comparison](docs/comparison.md): Unlatch next to other servers you can host yourself.
 - [Changes](CHANGELOG.md)
 
 ## Development

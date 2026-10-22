@@ -237,6 +237,86 @@ td:first-child code {
   white-space: nowrap;
 }
 
+/* Tables of five columns or more compare projects side by side: the second column is Unlatch,
+   and the first stays in view while the rest scroll on narrow screens. */
+table:has(th:nth-child(5)) {
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+/* Such a table takes the whole width beside the menu; the text around it keeps its measure. */
+main:has(table th:nth-child(5)) {
+  max-width: none;
+}
+
+main:has(table th:nth-child(5)) > :not(table) {
+  max-width: 46rem;
+}
+
+@media (width < 68rem) {
+  table:has(th:nth-child(5)) :is(th, td):first-child {
+    box-shadow: inset -1px 0 0 var(--line);
+  }
+}
+
+@media (width >= 68rem) {
+  table:has(th:nth-child(5)) {
+    display: table;
+    width: 100%;
+    table-layout: fixed;
+  }
+
+  table:has(th:nth-child(5)) th:first-child {
+    width: 8.5rem;
+  }
+}
+
+table:has(th:nth-child(5)) th {
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+table:has(th:nth-child(5)) :is(th, td) {
+  min-width: 7rem;
+  padding: 0.5rem 0.625rem;
+}
+
+table:has(th:nth-child(5)) :is(th, td):first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 7.5rem;
+  padding-left: 0;
+  background: var(--bg);
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+table:has(th:nth-child(5)) :is(th, td):nth-child(2) {
+  background: light-dark(
+    color-mix(in oklab, var(--accent) 9%, var(--bg)),
+    color-mix(in oklab, var(--accent) 22%, var(--bg))
+  );
+  color: var(--text);
+}
+
+table:has(th:nth-child(5)) th:nth-child(2) {
+  border-radius: 6px 6px 0 0;
+  color: var(--link);
+}
+
+table:has(th:nth-child(5)) tbody tr:hover td {
+  background-image: linear-gradient(var(--hover), var(--hover));
+}
+
+/* A row with only its first cell filled names the group of rows below it. */
+table:has(th:nth-child(5)) tbody tr:has(> td:nth-child(2):empty) > td {
+  padding-top: 1.5rem;
+  border-bottom-color: var(--line-strong);
+  background: var(--bg);
+  color: var(--text);
+}
+
 /* On narrow screens the menu becomes a row above the page. */
 @media (width < 52rem) {
   :root {

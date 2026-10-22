@@ -15,7 +15,7 @@ const REPOSITORY: &str = "https://github.com/Romanok2805/unlatch";
 
 /// Each page: its Markdown file and its address on the site. The menu lists them in this order.
 /// The site is for people who run Unlatch; links to documents for contributors lead to GitHub.
-const PAGES: [(&str, &str); 8] = [
+const PAGES: [(&str, &str); 9] = [
     ("README.md", "/"),
     ("docs/running.md", "/docs/running/"),
     ("docs/configuration.md", "/docs/configuration/"),
@@ -23,6 +23,7 @@ const PAGES: [(&str, &str); 8] = [
     ("docs/users.md", "/docs/users/"),
     ("docs/providers.md", "/docs/providers/"),
     ("docs/forward-auth.md", "/docs/forward-auth/"),
+    ("docs/comparison.md", "/docs/comparison/"),
     ("CHANGELOG.md", "/changelog/"),
 ];
 
