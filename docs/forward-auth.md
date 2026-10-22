@@ -6,8 +6,8 @@ and lets it through only for signed-in users who may use the service. How it wor
 
 1. In administration, add an application of the kind *Forward auth* with the host of the service,
    such as `photos.example.com`, and choose who may use it.
-2. List the address of your proxy in `UNLATCH_TRUSTED_PROXIES`. Unlatch answers forward-auth
-   requests only from there, because it relies on the `X-Forwarded-*` headers the proxy sets.
+2. List the address of your proxy in `UNLATCH_TRUSTED_PROXIES`; Unlatch answers forward-auth
+   requests only from there.
 3. Configure the proxy as below. Two things are needed for each protected host: requests to
    `/_unlatch/` go to Unlatch, and every other request is checked first.
 

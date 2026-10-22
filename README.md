@@ -16,15 +16,14 @@ Unlatch is young: it hasn't been audited or certified yet.
 
 ## Getting started
 
-Download a release, or build it with `cargo build --release`. Then create a master key and start
-it:
+Download a release, or build it with `cargo build --release`. To try it on this machine:
 
 ```sh
-unlatch generate-key > /etc/unlatch/key
-UNLATCH_ISSUER=https://login.example.com UNLATCH_KEY_FILE=/etc/unlatch/key unlatch
+(umask 077; unlatch generate-key > key)
+UNLATCH_ISSUER=http://localhost:8080 UNLATCH_KEY_FILE=key unlatch
 ```
 
-The log shows a link that creates the first administrator. The administrator then adds
+Then open the link from the log, which creates the first administrator. The administrator then adds
 applications in the web interface, where each shows the values to copy into it.
 
 ## Documentation

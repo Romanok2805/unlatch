@@ -296,6 +296,23 @@ pub(crate) fn success_notice(text: &str) -> Html {
     out
 }
 
+/// A sign-in or authorization that took too long or was altered; the user starts again from the
+/// application.
+pub(crate) fn expired_page(app: &App, request: &Request) -> Response {
+    let lang = Lang::of(request);
+    let text = lang.text();
+    let mut content = Html::new();
+    html!(content, "<h1>", { text.request_expired }, "</h1>");
+    Response::html(auth_page(
+        app,
+        request,
+        lang,
+        text.request_expired,
+        &content,
+    ))
+    .status(StatusCode::BAD_REQUEST)
+}
+
 pub(crate) fn error_page(app: &App, request: &Request, status: StatusCode) -> Response {
     let lang = Lang::of(request);
     let text = lang.text();

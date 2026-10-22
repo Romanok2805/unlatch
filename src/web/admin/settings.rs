@@ -5,11 +5,10 @@ use hyper::Method;
 use super::{Admin, field, notice, text_input};
 use crate::html::{Html, html};
 use crate::http::{Request, Response};
+use crate::store::audit::Action;
 use crate::store::settings;
 use crate::web::layout::{Section, copy_button, error_notice};
-use crate::web::{App, Branding, Failure, is_colour};
-
-const MAX_NAME_CHARS: usize = 60;
+use crate::web::{App, Branding, Failure, is_colour, is_name};
 
 /// `GET` and `POST /admin/settings`
 pub(super) async fn page(app: &App, request: &Request, admin: &Admin) -> Result<Response, Failure> {
@@ -18,7 +17,7 @@ pub(super) async fn page(app: &App, request: &Request, admin: &Admin) -> Result<
     if request.method == Method::POST {
         let name = field(request, "name").to_owned();
         let accent = field(request, "accent").to_ascii_lowercase();
-        if name.is_empty() || name.chars().count() > MAX_NAME_CHARS {
+        if !is_name(&name) {
             problem = Some(text.name_required);
         } else if !is_colour(&accent) {
             problem = Some(text.colour_invalid);
@@ -32,7 +31,9 @@ pub(super) async fn page(app: &App, request: &Request, admin: &Admin) -> Result<
                 })
                 .await?;
             app.set_branding(branding);
-            admin.record(app, request, "change settings", "").await?;
+            admin
+                .record(app, request, Action::ChangeSettings, "")
+                .await?;
             return Ok(Response::redirect("/admin/settings?notice=saved"));
         }
     }

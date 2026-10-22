@@ -33,11 +33,21 @@ pub(crate) struct Provider {
     pub(crate) kind: ProviderKind,
     pub(crate) issuer: Option<String>,
     pub(crate) client_id: String,
-    /// Sealed.
+    /// Sealed, with the context `web::providers::secret_context` gives; [`save`] leaves it alone
+    /// and [`set_secret`] stores it.
     pub(crate) client_secret: Vec<u8>,
     /// Email domains whose verified users get an account on first sign-in.
     pub(crate) auto_create_domains: Vec<String>,
     pub(crate) enabled: bool,
+}
+
+/// Google is an OpenID Connect provider like any other, except for its logo and its `hd` claim.
+pub(crate) const GOOGLE_ISSUER: &str = "https://accounts.google.com";
+
+impl Provider {
+    pub(crate) fn is_google(&self) -> bool {
+        self.issuer.as_deref() == Some(GOOGLE_ISSUER)
+    }
 }
 
 const COLUMNS: &str =
@@ -91,8 +101,7 @@ pub(crate) fn by_id(conn: &Connection, id: ProviderId) -> Result<Option<Provider
         .optional()?)
 }
 
-/// Creates a provider, or updates the one with `id`. An empty `client_secret` keeps the stored
-/// secret.
+/// Creates a provider, or updates the one with `id`, apart from its secret.
 pub(crate) fn save(
     conn: &Connection,
     id: Option<ProviderId>,
@@ -104,14 +113,13 @@ pub(crate) fn save(
             conn.execute(
                 "INSERT INTO providers (slug, name, kind, issuer, client_id, client_secret,
                                         auto_create_domains, enabled)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, X'', ?6, ?7)",
                 params![
                     provider.slug,
                     provider.name,
                     provider.kind.name(),
                     provider.issuer,
                     provider.client_id,
-                    provider.client_secret,
                     domains,
                     provider.enabled
                 ],
@@ -121,16 +129,14 @@ pub(crate) fn save(
         Some(id) => {
             conn.execute(
                 "UPDATE providers SET slug = ?1, name = ?2, kind = ?3, issuer = ?4, client_id = ?5,
-                        client_secret = CASE WHEN length(?6) > 0 THEN ?6 ELSE client_secret END,
-                        auto_create_domains = ?7, enabled = ?8
-                 WHERE id = ?9",
+                        auto_create_domains = ?6, enabled = ?7
+                 WHERE id = ?8",
                 params![
                     provider.slug,
                     provider.name,
                     provider.kind.name(),
                     provider.issuer,
                     provider.client_id,
-                    provider.client_secret,
                     domains,
                     provider.enabled,
                     id.0
@@ -139,6 +145,15 @@ pub(crate) fn save(
             Ok(id)
         }
     }
+}
+
+/// Stores a sealed client secret. It is sealed with the row as context, so the row comes first.
+pub(crate) fn set_secret(conn: &Connection, id: ProviderId, sealed: &[u8]) -> Result<(), DbError> {
+    conn.execute(
+        "UPDATE providers SET client_secret = ?2 WHERE id = ?1",
+        params![id.0, sealed],
+    )?;
+    Ok(())
 }
 
 pub(crate) fn delete(conn: &Connection, id: ProviderId) -> Result<(), DbError> {

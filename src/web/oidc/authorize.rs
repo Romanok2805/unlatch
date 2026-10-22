@@ -4,7 +4,7 @@ use hyper::StatusCode;
 
 use super::super::csrf::{self, Csrf};
 use super::super::i18n::Lang;
-use super::super::layout::{auth_page, error_page, icon};
+use super::super::layout::{auth_page, error_page, expired_page, icon};
 use super::super::{App, Failure, session};
 use super::request::{self, Arrival, AuthRequest, Rejection};
 use super::{CODE_LIFETIME, append_query};
@@ -122,10 +122,10 @@ fn send_back(app: &App, request: &Request, to: &ReplyTo<'_>, pairs: &[(&str, &st
     html!(
         content,
         "<button class=\"primary block\">",
-        { text.continue_setup },
+        { text.proceed },
         "</button></form>"
     );
-    Response::html(auth_page(app, request, lang, text.continue_setup, &content))
+    Response::html(auth_page(app, request, lang, text.proceed, &content))
 }
 
 /// The name of the application a sign-in is for, when the sign-in continues an authorization.
@@ -207,10 +207,10 @@ async fn next_step(
 /// `GET /authorize/continue`
 pub(crate) async fn resume(app: &App, request: &Request) -> Result<Response, Failure> {
     let Some(auth) = open(app, request) else {
-        return Ok(expired(app, request));
+        return Ok(expired_page(app, request));
     };
     let Some(client) = client_of(app, &auth).await? else {
-        return Ok(expired(app, request));
+        return Ok(expired_page(app, request));
     };
     if !client.enabled {
         return Ok(error_redirect(
@@ -263,7 +263,7 @@ pub(crate) async fn resume(app: &App, request: &Request) -> Result<Response, Fai
 /// `POST /authorize/continue`: the answer on the consent page.
 pub(crate) async fn decide(app: &App, request: &Request) -> Result<Response, Failure> {
     let Some(auth) = open(app, request) else {
-        return Ok(expired(app, request));
+        return Ok(expired_page(app, request));
     };
     if !csrf::verify(app, request) {
         return Ok(Response::redirect(continue_url(
@@ -271,7 +271,7 @@ pub(crate) async fn decide(app: &App, request: &Request) -> Result<Response, Fai
         )));
     }
     let Some(client) = client_of(app, &auth).await? else {
-        return Ok(expired(app, request));
+        return Ok(expired_page(app, request));
     };
     let session = match next_step(app, request, &auth, &client).await? {
         Next::Consent(session) | Next::Code(session) if client.enabled => session,
@@ -440,19 +440,4 @@ fn no_access(
         Response::html(auth_page(app, request, lang, &title, &content))
             .status(StatusCode::FORBIDDEN),
     )
-}
-
-fn expired(app: &App, request: &Request) -> Response {
-    let lang = Lang::of(request);
-    let text = lang.text();
-    let mut content = Html::new();
-    html!(content, "<h1>", { text.request_expired }, "</h1>");
-    Response::html(auth_page(
-        app,
-        request,
-        lang,
-        text.request_expired,
-        &content,
-    ))
-    .status(StatusCode::BAD_REQUEST)
 }

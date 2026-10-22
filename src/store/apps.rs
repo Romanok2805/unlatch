@@ -17,6 +17,17 @@ pub(crate) enum Kind {
     Proxy,
 }
 
+impl Kind {
+    /// The kind stored in the `kind` column, which its CHECK limits to 'oidc' and 'proxy'.
+    fn from_column(kind: &str) -> Self {
+        if kind == "proxy" {
+            Self::Proxy
+        } else {
+            Self::Oidc
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct AppRecord {
     pub(crate) id: AppId,
@@ -53,11 +64,7 @@ fn from_row(row: &Row<'_>) -> rusqlite::Result<AppRecord> {
     Ok(AppRecord {
         id: AppId(row.get(0)?),
         name: row.get(1)?,
-        kind: if kind == "proxy" {
-            Kind::Proxy
-        } else {
-            Kind::Oidc
-        },
+        kind: Kind::from_column(&kind),
         enabled: row.get(3)?,
         all_users: row.get(4)?,
         skip_consent: row.get(5)?,
@@ -189,11 +196,7 @@ pub(crate) fn list(conn: &Connection) -> Result<Vec<AppSummary>, DbError> {
             Ok(AppSummary {
                 id: AppId(row.get(0)?),
                 name: row.get(1)?,
-                kind: if kind == "proxy" {
-                    Kind::Proxy
-                } else {
-                    Kind::Oidc
-                },
+                kind: Kind::from_column(&kind),
                 enabled: row.get(3)?,
                 all_users: row.get(4)?,
                 groups: row.get::<_, Option<String>>(5)?.unwrap_or_default(),

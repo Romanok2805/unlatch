@@ -1,7 +1,7 @@
 # Threat model
 
-What Unlatch protects, from whom, and where in [the architecture](architecture.md) each defence is
-described.
+What Unlatch protects, from whom, and where in [the architecture](architecture.md) each defence
+is described.
 
 ## What an attacker wants
 
@@ -21,7 +21,7 @@ opens the services behind Unlatch.
 
 ```
 browser ── reverse proxy ── Unlatch ── SQLite file
-                               │  └─── encryption key (file or environment)
+                               │  └─── encryption key (file)
                                ├─── outside sign-in providers
                                └─── connected applications (back-channel logout)
 ```
@@ -37,7 +37,7 @@ arrives over the network is untrusted, including connected applications and outs
 | Finding out which accounts exist | [Dummy hash for unknown names](architecture.md#signing-in) |
 | Guessing or reusing a TOTP code | [Single-use codes, attempt limits](architecture.md#signing-in) |
 | Taking over a fresh installation | [One-time setup token](architecture.md#signing-in) |
-| Taking over an account through an outside provider | [Linking by issuer and subject](architecture.md#signing-in) |
+| Taking over an account through an outside provider | [Linking by provider and subject](architecture.md#signing-in) |
 | Stealing or fixing a session | [Cookie flags, new ID at sign-in, expiry](architecture.md#sessions-and-pages) |
 | Cross-site request forgery | [CSRF tokens](architecture.md#sessions-and-pages) |
 | Cross-site scripting | [`Html` type, CSP, Trusted Types](architecture.md#sessions-and-pages) |
@@ -46,7 +46,7 @@ arrives over the network is untrusted, including connected applications and outs
 | Open redirects, altered redirect URIs | [Exact match, error page](architecture.md#openid-connect) |
 | Mixing up responses from two providers | [`iss` in responses](architecture.md#openid-connect) |
 | Another program posing as a native app | [Consent asked every time](architecture.md#openid-connect) |
-| Intercepted or replayed authorization codes | [PKCE, single-use codes](architecture.md#tokens) |
+| Intercepted or replayed authorization codes | [PKCE](architecture.md#openid-connect), [single-use codes](architecture.md#tokens) |
 | Using a token at the wrong service | [Audience, `at+jwt`](architecture.md#tokens) |
 | Stolen refresh token | [Rotation, reuse revokes the grant, DPoP](architecture.md#tokens) |
 | Stolen access token | [Five-minute lifetime, DPoP](architecture.md#tokens) |

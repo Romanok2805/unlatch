@@ -6,38 +6,10 @@ use super::DbError;
 use super::groups::GroupId;
 use crate::crypto::TokenHash;
 use crate::crypto::password::PasswordHash;
+use crate::identifier::Identifier;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct UserId(pub(crate) i64);
-
-/// A user name: lowercase ASCII letters, digits, dots, dashes and underscores, starting with a
-/// letter or digit. With one case and no look-alike characters, two different names can't be
-/// mistaken for each other on screen or collide after normalisation.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Username(String);
-
-impl Username {
-    pub(crate) const MAX_LEN: usize = 64;
-
-    pub(crate) fn parse(text: &str) -> Option<Self> {
-        let valid = text.len() <= Self::MAX_LEN
-            && text.starts_with(|c: char| c.is_ascii_lowercase() || c.is_ascii_digit())
-            && text.chars().all(|c| {
-                c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '-' | '_')
-            });
-        valid.then(|| Self(text.to_owned()))
-    }
-
-    pub(crate) fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-/// A display name: up to 100 characters of any script, without control characters, since
-/// names travel in HTTP headers of forward authentication.
-pub(crate) fn display_name_ok(name: &str) -> bool {
-    !name.is_empty() && name.chars().count() <= 100 && !name.chars().any(char::is_control)
-}
 
 pub(crate) struct User {
     pub(crate) id: UserId,
@@ -46,7 +18,7 @@ pub(crate) struct User {
     pub(crate) email: Option<String>,
     pub(crate) email_verified: bool,
     pub(crate) password_hash: Option<PasswordHash>,
-    /// Sealed; see `auth::totp`.
+    /// Sealed; see [`crate::crypto::totp`].
     pub(crate) totp_secret: Option<Vec<u8>>,
     pub(crate) totp_last_step: Option<i64>,
     pub(crate) is_admin: bool,
@@ -76,20 +48,22 @@ pub(crate) fn from_row(row: &Row<'_>) -> rusqlite::Result<User> {
 }
 
 pub(crate) struct NewUser<'a> {
-    pub(crate) username: &'a Username,
+    pub(crate) username: &'a Identifier,
     pub(crate) display_name: &'a str,
     pub(crate) email: Option<&'a str>,
+    pub(crate) email_verified: bool,
     pub(crate) is_admin: bool,
 }
 
 pub(crate) fn create(conn: &Connection, user: &NewUser<'_>) -> Result<UserId, DbError> {
     conn.execute(
-        "INSERT INTO users (username, display_name, email, is_admin, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO users (username, display_name, email, email_verified, is_admin, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             user.username.as_str(),
             user.display_name,
             user.email,
+            user.email_verified,
             user.is_admin,
             crate::time::now()
         ],
@@ -326,35 +300,17 @@ mod tests {
     use super::*;
     use crate::store::Db;
 
-    #[test]
-    fn user_names_have_one_spelling() {
-        for good in ["anna", "a", "anna.k", "anna_k-2", "9lives"] {
-            assert!(Username::parse(good).is_some(), "{good}");
-        }
-        for bad in [
-            "",
-            "Anna",
-            ".anna",
-            "-anna",
-            "anna k",
-            "аnna",
-            "anna@lan",
-            &"a".repeat(65),
-        ] {
-            assert!(Username::parse(bad).is_none(), "{bad}");
-        }
-    }
-
     #[tokio::test]
     async fn names_are_unique() {
         let db = Db::open_in_memory().unwrap();
         let result = db
             .run(|conn| {
-                let name = Username::parse("anna").unwrap();
+                let name = Identifier::parse("anna").unwrap();
                 let new = NewUser {
                     username: &name,
                     display_name: "Anna",
                     email: None,
+                    email_verified: false,
                     is_admin: true,
                 };
                 let id = create(conn, &new)?;
@@ -369,11 +325,12 @@ mod tests {
     async fn the_last_admin_stays_and_ids_are_never_reused() {
         let db = Db::open_in_memory().unwrap();
         let add = |conn: &Connection, name| {
-            let name = Username::parse(name).unwrap();
+            let name = Identifier::parse(name).unwrap();
             let new = NewUser {
                 username: &name,
                 display_name: "",
                 email: None,
+                email_verified: false,
                 is_admin: true,
             };
             create(conn, &new)

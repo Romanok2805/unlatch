@@ -7,12 +7,11 @@ use std::fmt;
 use std::io::Write as _;
 use std::sync::atomic::{AtomicU8, Ordering};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Level {
     Error,
     Warn,
     Info,
-    Debug,
 }
 
 impl Level {
@@ -20,14 +19,13 @@ impl Level {
         Self::ALL.into_iter().find(|level| level.name() == name)
     }
 
-    const ALL: [Self; 4] = [Self::Error, Self::Warn, Self::Info, Self::Debug];
+    const ALL: [Self; 3] = [Self::Error, Self::Warn, Self::Info];
 
     const fn name(self) -> &'static str {
         match self {
             Self::Error => "error",
             Self::Warn => "warn",
             Self::Info => "info",
-            Self::Debug => "debug",
         }
     }
 
@@ -36,7 +34,6 @@ impl Level {
             Self::Error => 0,
             Self::Warn => 1,
             Self::Info => 2,
-            Self::Debug => 3,
         }
     }
 }

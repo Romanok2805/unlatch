@@ -1,4 +1,5 @@
-//! Administration: applications, users, groups, sessions, the audit log and settings.
+//! Administration: applications, users, groups, sessions, sign-in providers, the audit log and
+//! settings.
 //!
 //! Only administrators with two-factor sign-in reach it, and only with a code entered recently:
 //! within 12 hours to look, within 30 minutes to change anything. Everyone else gets a 404, so
@@ -16,12 +17,13 @@ use hyper::{Method, StatusCode};
 use super::csrf::{self, Csrf};
 use super::i18n::Lang;
 use super::layout::{Frame, Section, admin_page, auth_page, error_notice, success_notice, tooltip};
+use super::record_audit;
 use super::signin::verify_code;
 use super::{App, Failure, is_local_path, session};
 use crate::form::encode;
 use crate::html::{Html, html};
 use crate::http::{Request, Response};
-use crate::store::audit;
+use crate::store::audit::Action;
 use crate::store::sessions::{self, ActiveSession};
 use crate::time;
 
@@ -58,33 +60,15 @@ impl Admin {
         self.csrf.apply(app, Response::html(page))
     }
 
-    /// Records a change in the audit log.
+    /// Records a change by this administrator in the audit log.
     pub(crate) async fn record(
         &self,
         app: &App,
         request: &Request,
-        action: &'static str,
+        action: Action,
         target: &str,
     ) -> Result<(), Failure> {
-        let (actor, target, ip) = (
-            self.session.user.username.clone(),
-            target.to_owned(),
-            request.client_ip.to_string(),
-        );
-        app.db
-            .run(move |conn| {
-                audit::record(
-                    conn,
-                    &audit::Entry {
-                        actor: &actor,
-                        action,
-                        target: &target,
-                        ip: &ip,
-                    },
-                )
-            })
-            .await?;
-        Ok(())
+        record_audit(app, request, &self.session.user.username, action, target).await
     }
 }
 

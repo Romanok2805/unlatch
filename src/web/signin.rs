@@ -22,10 +22,11 @@ use crate::form::encode;
 use crate::html::{Html, html};
 use crate::http::cookie::{self, SetCookie};
 use crate::http::{Request, Response};
+use crate::identifier::Identifier;
 use crate::log::info;
 use crate::secret::Secret;
-use crate::store::audit;
-use crate::store::users::{self, User, UserId, Username};
+use crate::store::audit::{self, Action};
+use crate::store::users::{self, User, UserId};
 use crate::time;
 
 const PENDING_COOKIE: &str = "signin";
@@ -175,7 +176,7 @@ async fn login_page(
     if !providers.is_empty() {
         html!(content, "<div class=\"alternatives\">");
         for provider in &providers {
-            let google = provider.issuer.as_deref() == Some("https://accounts.google.com");
+            let google = provider.is_google();
             html!(
                 content,
                 "<a class=\"button block\" href=\"/login/",
@@ -223,7 +224,7 @@ pub(super) async fn submit(app: &App, request: &Request) -> Result<Response, Fai
         .flatten()
         .unwrap_or_default();
     // Names that can't exist share one key, so junk names can't fill the limiter.
-    let account_key = if Username::parse(&username).is_some() {
+    let account_key = if Identifier::parse(&username).is_some() {
         username.as_str()
     } else {
         ""
@@ -309,9 +310,9 @@ struct Pending {
     next: String,
 }
 
-/// Carries the first step to the code step in a sealed cookie that lasts five minutes. It is
-/// `Lax`, because after a provider the browser arrives here by a redirect that began on another
-/// site.
+/// Carries the first step to the code step in a sealed cookie that lasts five minutes. Like every
+/// cookie it is `Lax`, which matters here: after a provider, the browser arrives by a redirect
+/// that began on another site.
 fn set_pending(
     app: &App,
     checked: &FirstFactor,
@@ -376,7 +377,7 @@ async fn finish(
                 conn,
                 &audit::Entry {
                     actor: &entry_actor,
-                    action: "sign in",
+                    action: Action::SignIn,
                     target: "",
                     ip: &ip,
                 },

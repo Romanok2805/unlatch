@@ -23,7 +23,7 @@ impl fmt::Display for InvalidRedirectUri {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::TooLong => "the address is too long",
-            Self::Whitespace => "the address contains spaces or control characters",
+            Self::Whitespace => "the address contains spaces, backslashes or control characters",
             Self::Fragment => "the address has a fragment",
             Self::NoHost => "the address has no host",
             Self::PlainHttp => "plain http is only allowed for 127.0.0.1 and [::1]",

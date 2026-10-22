@@ -37,6 +37,8 @@ pub(crate) enum Plain {
 #[derive(Debug)]
 pub(crate) enum ClientError {
     Url,
+    /// A token or credential held characters a header can't carry.
+    Header,
     Connect(std::io::Error),
     Tls(std::io::Error),
     Http(hyper::Error),
@@ -50,6 +52,7 @@ impl fmt::Display for ClientError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Url => f.write_str("the address isn't an https URL we may contact"),
+            Self::Header => f.write_str("a credential can't be sent in a header"),
             Self::Connect(e) => write!(f, "connecting failed: {e}"),
             Self::Tls(e) => write!(f, "TLS failed: {e}"),
             Self::Http(e) => write!(f, "HTTP failed: {e}"),
@@ -97,8 +100,8 @@ impl Client {
         let target = parse(url, plain).ok_or(ClientError::Url)?;
         let mut request = request(&target, Method::GET, Bytes::new())?;
         if let Some(token) = bearer {
-            let value =
-                HeaderValue::from_str(&format!("Bearer {token}")).map_err(|_| ClientError::Url)?;
+            let value = HeaderValue::from_str(&format!("Bearer {token}"))
+                .map_err(|_| ClientError::Header)?;
             request.headers_mut().insert(header::AUTHORIZATION, value);
         }
         let (status, body) = self.send(&target, request).await?;
@@ -151,7 +154,7 @@ impl Client {
                 credentials.push('=');
             }
             let value = HeaderValue::from_str(&format!("Basic {credentials}"))
-                .map_err(|_| ClientError::Url)?;
+                .map_err(|_| ClientError::Header)?;
             headers.insert(header::AUTHORIZATION, value);
         }
         self.send(&target, request).await

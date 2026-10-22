@@ -1,15 +1,17 @@
-//! The account page: password and two-factor sign-in.
+//! The account page: password, two-factor sign-in, linked sign-in providers and sessions.
 
 use super::csrf::{self, Csrf};
+use super::device::describe_device;
 use super::i18n::{Lang, Text};
 use super::layout::{auth_page, error_notice, icon, success_notice, tooltip};
-use super::session_table::describe_device;
+use super::record_audit;
 use super::signin::{check_password, hash_password, recovery_code_hash, totp_context, verify_code};
 use super::{App, Failure, qr, session};
 use crate::crypto::{random_bytes, totp};
 use crate::encoding::{base32, base64url, decode_base64url};
 use crate::html::{Html, html};
 use crate::http::{Request, Response};
+use crate::store::audit::Action;
 use crate::store::sessions::{self, ActiveSession, SessionId, SessionSummary};
 use crate::store::users::UserId;
 use crate::store::{audit, providers, users};
@@ -47,8 +49,8 @@ const COMMON_PASSWORDS: [&str; 24] = [
     "administrator",
 ];
 
-/// What is wrong with a new password, following NIST SP 800-63B-4: long enough, not too long to
-/// hash, not a known common one and not the user name. No rules about character classes.
+/// What is wrong with a new password: too short, too long to hash, a known common one or the
+/// user name. As NIST SP 800-63B-4 advises, there are no rules about character classes.
 pub(super) fn password_problem(
     text: &Text,
     username: &str,
@@ -169,7 +171,7 @@ async fn provider_list(
     );
     for provider in &enabled {
         let is_linked = linked.contains(&provider.id);
-        let google = provider.issuer.as_deref() == Some("https://accounts.google.com");
+        let google = provider.is_google();
         html!(
             *out,
             "<li>",
@@ -304,7 +306,9 @@ pub(super) fn new_password_fields(text: &Text) -> Html {
         out,
         "<div><label for=\"new\">",
         { text.new_password },
-        "</label><input id=\"new\" name=\"new\" type=\"password\" autocomplete=\"new-password\" minlength=\"12\" required>",
+        "</label><input id=\"new\" name=\"new\" type=\"password\" autocomplete=\"new-password\" minlength=\"",
+        { MIN_PASSWORD_CHARS },
+        "\" required>",
         "</div><div><label for=\"repeat\">",
         { text.repeat_password },
         "</label><input id=\"repeat\" name=\"repeat\" type=\"password\" autocomplete=\"new-password\" required></div>"
@@ -351,7 +355,7 @@ pub(super) async fn password_submit(app: &App, request: &Request) -> Result<Resp
                 conn,
                 &audit::Entry {
                     actor: &username,
-                    action: "change password",
+                    action: Action::ChangePassword,
                     target: &username,
                     ip: &ip,
                 },
@@ -574,7 +578,7 @@ pub(super) async fn two_factor_submit(app: &App, request: &Request) -> Result<Re
                 users::accept_totp_step(conn, id, step).map(|_| ())
             })
             .await?;
-        record(app, request, &session, "turn on two-factor sign-in").await?;
+        record(app, request, &session, Action::TurnOnTwoFactor).await?;
         return new_recovery_codes(app, request, &session).await;
     }
     if user.totp_secret.is_none() {
@@ -594,34 +598,22 @@ pub(super) async fn two_factor_submit(app: &App, request: &Request) -> Result<Re
             app.db
                 .run(move |conn| users::set_totp(conn, id, None))
                 .await?;
-            record(app, request, &session, "turn off two-factor sign-in").await?;
+            record(app, request, &session, Action::TurnOffTwoFactor).await?;
             Ok(Response::redirect("/account"))
         }
         _ => Ok(Response::redirect("/account/two-factor")),
     }
 }
 
+/// Records a change users made to their own account.
 async fn record(
     app: &App,
     request: &Request,
     session: &ActiveSession,
-    action: &'static str,
+    action: Action,
 ) -> Result<(), Failure> {
-    let (username, ip) = (session.user.username.clone(), request.client_ip.to_string());
-    app.db
-        .run(move |conn| {
-            audit::record(
-                conn,
-                &audit::Entry {
-                    actor: &username,
-                    action,
-                    target: &username,
-                    ip: &ip,
-                },
-            )
-        })
-        .await?;
-    Ok(())
+    let username = &session.user.username;
+    record_audit(app, request, username, action, username).await
 }
 
 /// Replaces the recovery codes and shows the new ones, the only time they are visible.

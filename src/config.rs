@@ -79,9 +79,8 @@ impl Config {
 
         let log_level = match get("UNLATCH_LOG") {
             None => Level::Info,
-            Some(name) => Level::parse(&name).ok_or_else(|| {
-                ConfigError("UNLATCH_LOG must be error, warn, info or debug".into())
-            })?,
+            Some(name) => Level::parse(&name)
+                .ok_or_else(|| ConfigError("UNLATCH_LOG must be error, warn or info".into()))?,
         };
 
         let tls = match (get("UNLATCH_TLS_CERT"), get("UNLATCH_TLS_KEY")) {

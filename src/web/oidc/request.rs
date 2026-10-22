@@ -10,7 +10,8 @@ use crate::form::Form;
 use crate::store::apps::{self, AppRecord, Kind};
 use crate::time;
 
-/// State and nonce travel inside sealed cookies, which browsers cap at 4 KB.
+/// State and nonce travel inside the sealed request in URLs, which must stay short enough for
+/// browsers and proxies.
 const MAX_STATE_LEN: usize = 512;
 const MAX_NONCE_LEN: usize = 256;
 const MAX_LOGIN_HINT_LEN: usize = 100;
@@ -313,8 +314,8 @@ fn validate(
     if value("nonce").is_some_and(|nonce| nonce.len() > MAX_NONCE_LEN) {
         return Err(("invalid_request", "nonce is too long"));
     }
-    // PKCE with S256 (RFC 9700). Only a confidential client may go without, if the administrator
-    // allowed it: its secret is then what keeps a stolen code useless.
+    // PKCE with S256 (RFC 7636), which RFC 9700 asks of every client. Only a confidential client
+    // may go without, if the administrator allowed it: its secret then keeps a stolen code useless.
     let challenge = match value("code_challenge") {
         Some(challenge) => Some(challenge),
         None if client.require_pkce || client.client_secret_hash.is_none() => {

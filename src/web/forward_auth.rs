@@ -8,7 +8,7 @@
 use hyper::{StatusCode, header};
 
 use super::i18n::Lang;
-use super::layout::auth_page;
+use super::layout::{auth_page, expired_page};
 use super::{App, Failure, is_local_path, session};
 use crate::crypto::{TokenHash, constant_time_eq, random_token, sha256};
 use crate::form::encode_pairs;
@@ -162,7 +162,7 @@ pub(crate) async fn start(app: &App, request: &Request) -> Result<Response, Fail
         .unwrap_or("/")
         .to_owned();
     if value("state").len() < 32 {
-        return Ok(expired(app, request));
+        return Ok(expired_page(app, request));
     }
     let state_hash = sha256(value("state").as_bytes());
     let lookup = host.clone();
@@ -265,12 +265,12 @@ pub(crate) async fn callback(app: &App, request: &Request) -> Result<Response, F
     let Some(redeemed) = redeemed
         .filter(|redeemed| constant_time_eq(&sha256(state.as_bytes()), &redeemed.state_hash))
     else {
-        return Ok(expired(app, request));
+        return Ok(expired_page(app, request));
     };
     let (session_id, app_id, path) = (redeemed.session, redeemed.app, redeemed.path);
     let record = app.db.run(move |conn| apps::by_id(conn, app_id)).await?;
     if record.is_none_or(|record| record.host.as_deref() != Some(host.as_str())) {
-        return Ok(expired(app, request));
+        return Ok(expired_page(app, request));
     }
     let token = random_token()?;
     let token_hash = TokenHash::of(&token);
@@ -334,21 +334,6 @@ fn no_access(app: &App, request: &Request, name: &str, username: &str) -> Respon
         "</a></div>"
     );
     Response::html(auth_page(app, request, lang, &title, &content)).status(StatusCode::FORBIDDEN)
-}
-
-fn expired(app: &App, request: &Request) -> Response {
-    let lang = Lang::of(request);
-    let text = lang.text();
-    let mut content = Html::new();
-    html!(content, "<h1>", { text.request_expired }, "</h1>");
-    Response::html(auth_page(
-        app,
-        request,
-        lang,
-        text.request_expired,
-        &content,
-    ))
-    .status(StatusCode::BAD_REQUEST)
 }
 
 #[cfg(test)]

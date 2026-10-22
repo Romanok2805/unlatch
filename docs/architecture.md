@@ -1,6 +1,6 @@
 # Architecture
 
-How Unlatch works and why. The document changes when the design does.
+How Unlatch works and why.
 
 Unlatch is one process with one SQLite database, normally running behind a reverse proxy. It serves
 the sign-in pages, the OpenID Connect endpoints, forward-auth checks for the proxy and a web
@@ -16,8 +16,8 @@ From then on it lives in a type that can only hold valid values, so the rest of 
 an unchecked redirect URI or user name.
 
 The code doesn't panic. A panic takes the server down for everyone, so every failure is an ordinary
-error value with a defined response. Every queue, cache and buffer has a size limit, so heavy traffic
-can slow Unlatch down but can't make it run out of memory.
+error value with a defined response. Every queue, cache and buffer has a size limit, so heavy
+traffic can slow Unlatch down but can't make it run out of memory.
 
 Some rules are enforced by types, so the compiler catches what a reviewer could miss:
 
@@ -58,9 +58,9 @@ Left out on purpose:
 A client can push its authorization request to `/par` first (RFC 9126) and send the browser only a
 reference. Nobody on the way can then read or change the request, and a confidential client proves
 who it is before the user sees anything. An application can be set to accept only pushed requests.
-The reference is the request itself, sealed, so pushing stores nothing. Within its minute it can be
-used more than once, as when a page is reloaded, which only repeats the same request of the same
-client.
+The reference is the request itself, sealed, so pushing stores nothing. Within its minute it can
+be used more than once, as when a page is reloaded, which only repeats the same request of the
+same client.
 
 A redirect URI must match a registered one character for character. The only exception comes from
 RFC 8252: a native app on the user's machine may use any port on a loopback address. When the client
@@ -96,33 +96,35 @@ accepted once, within a minute of the time it states. An application can be set 
 The `sub` of a user is derived from the account with a key, so it is stable but reveals neither the
 order of accounts nor how many there are.
 
-ID tokens are signed with RS256 by default, because the OpenID Connect specification requires it. A
-client can ask for ES256 or EdDSA instead. Signing keys rotate every 90 days: a new key appears in
-JWKS a day before it signs anything, and an old one stays there for a week after it stops.
+ID tokens are signed with RS256 by default, because the OpenID Connect specification requires it. An
+administrator can pick ES256 or EdDSA for an application instead. Signing keys rotate every 90 days:
+a new key appears in JWKS a day before it signs anything, and an old one stays there for a week
+after it stops.
 
 ## Signing in
 
-Passwords are hashed with Argon2id. Each hash needs tens of megabytes of memory for a moment, so only
-two run at once and the rest wait their turn. This caps memory use and keeps the login form from
-being used to overload the server. For a user name that doesn't exist, Unlatch hashes a dummy
-password anyway, so the response time doesn't reveal which accounts exist. Password rules follow
-NIST SP 800-63B-4: at least 12 characters, no "must contain a digit" rules, and a check against
-common passwords and the user name.
+Passwords are hashed with Argon2id. Each hash needs 19 MiB of memory for a moment, so only two run
+at once and the rest wait their turn. This caps memory use and keeps the login form from being used
+to overload the server. For a user name that doesn't exist, Unlatch hashes a dummy password anyway,
+so the response time doesn't reveal which accounts exist. A password needs at least 12 characters
+and must not be a common password or the user name; as NIST SP 800-63B-4 advises, there are no rules
+about character classes. Password attempts are limited to 10 per account and 50 per address in a
+quarter hour.
 
 The second factor is a TOTP code from an authenticator app: RFC 6238 with SHA-1, six digits and
 30-second steps, because that is what the apps support. Codes from the previous and next step are
 accepted to allow for clock drift. Each code works once, and attempts are limited per quarter hour
 and per day. Users also get recovery codes.
 
-People can sign in with any OpenID Connect provider, such as Google, and with GitHub through its own
-OAuth API. An outside account is linked to a local one by provider and subject only, and only by a
-user who is already signed in. Accounts are never matched by email address, because that would let
-whoever controls the address at the provider take over the local account. Creating accounts on the
-first outside sign-in is off by default. When the administrator lists email domains for it, the
-provider must confirm the address and its domain must be on the list. With Google the account must
-also belong to that domain's Google Workspace, because a personal Google account can have a
-confirmed address at any domain. An account with TOTP still asks for a code after an outside
-sign-in.
+People can sign in with any OpenID Connect provider, such as Google, and with GitHub through its
+own OAuth API. An outside account is linked to a local one by provider and subject only, and only
+by a user who is already signed in. Accounts are never matched by email address, because that
+would let whoever controls the address at the provider take over the local account. Creating
+accounts on the first outside sign-in is off by default. When the administrator lists email
+domains for it, the provider must confirm the address and its domain must be on the list. With
+Google the account must also belong to that domain's Google Workspace, because a personal Google
+account can have a confirmed address at any domain. An account with TOTP still asks for a code
+after an outside sign-in.
 
 Unlatch doesn't send email. The administrator gives people one-time links to join or to reset their
 password, and users who lose their authenticator get in with a recovery code.
@@ -149,8 +151,8 @@ Administration needs TOTP and a code entered within the last 12 hours to look an
 minutes to change anything. To everyone else its pages don't exist. Every change is recorded in the
 audit log.
 
-Unlatch only sends requests to addresses an administrator configured: sign-in providers and
-back-channel logout URIs of applications.
+Unlatch sends requests only to the sign-in providers and back-channel logout URIs an administrator
+configured, and to the endpoints a provider's discovery document names.
 
 The interface uses the system font, a small set of icons and light and dark themes, with an accent
 colour the administrator can change. It comes in English and Russian.
@@ -160,14 +162,16 @@ colour the administrator can change. It comes in English and Russian.
 Some services don't support OpenID Connect. For them, the reverse proxy asks Unlatch about each
 request (nginx `auth_request`, Traefik `forwardAuth`, Caddy `forward_auth`) and passes the user on
 to the service in the `Remote-User`, `Remote-Name`, `Remote-Email` and `Remote-Groups` headers.
-Unlatch answers only proxies listed as trusted, because it relies on their `X-Forwarded-*` headers.
+Every one of these headers is in each answer that lets a request through, empty if there is
+nothing to say, so a proxy that copies them can't leave one the client wrote in place. Unlatch
+answers only proxies listed as trusted, because it relies on their `X-Forwarded-*` headers.
 
-Each protected host gets its own cookie, so no cookie is shared between subdomains. After sign-in
-Unlatch sends the browser to `/_unlatch/callback` on the protected host, which the proxy routes to
-Unlatch, with a code that works once within a minute and is traded for a new token there. A cookie
-set on the protected host when the sign-in starts ties the code to that browser, so nobody can
-plant a code of their own session on someone else. The configuration of each proxy is in
-[forward-auth.md](forward-auth.md).
+Each protected host gets its own cookie, so no cookie is shared between subdomains. After
+sign-in Unlatch sends the browser to `/_unlatch/callback` on the protected host, which the proxy
+routes to Unlatch, with a code that works once within a minute and is traded for a new token
+there. A cookie set on the protected host when the sign-in starts ties the code to that browser,
+so nobody can plant a code of their own session on someone else. The configuration of each proxy
+is in [forward-auth.md](forward-auth.md).
 
 ## Storage
 
@@ -193,21 +197,21 @@ certificates. Unlatch can also serve TLS itself with rustls from PEM files and p
 certificate without a restart.
 
 `X-Forwarded-For` and related headers are trusted only from proxy addresses listed in the
-configuration, and by default from none. Otherwise anyone could fake their IP address and get around
-the attempt limits. The issuer URL is set in the configuration too and never built from the `Host`
-header.
+configuration, and by default from none. Otherwise anyone could fake their IP address and get
+around the attempt limits. The issuer URL is set in the configuration too and never built from the
+`Host` header.
 
 Request and header sizes, the number of connections and every timeout are limited.
 
 ## Memory
 
 Measured with the release build on Windows: the binary is 7 MB, and the server holds about 7 MB of
-memory at rest. Serving 4,000 sign-in pages to 20 clients at once, at about 4,000 a second, it
-stays under 8 MB. Password checks raise it to about 46 MB for a moment, two hashes of 19 MB each,
-and it drops back when they finish.
+memory at rest. With 20 clients asking for the sign-in page at once, about 4,000 requests a second,
+it stays under 8 MB. Password checks raise it to about 46 MB for a moment, two hashes of 19 MiB
+each, and it drops back when they finish.
 
 The async runtime uses two worker threads. Static files are built into the binary and cached by
-browsers under names that include their hash.
+browsers under addresses that include a hash of their contents.
 
 ## Dependencies
 
@@ -222,15 +226,9 @@ browsers under names that include their hash.
 | JSON | `serde`, `serde_json` | Parsers are easy to get wrong. |
 | QR codes | `qrcodegen` | Encoding QR codes correctly is a project of its own. |
 
-Configuration comes from environment variables, so no configuration file format is needed; see
-[configuration.md](configuration.md).
+Configuration comes from environment variables, so no configuration file format is needed;
+see [configuration.md](configuration.md).
 
-We write the small parts ourselves when that is easier to review than a dependency: JWS for the
-algorithms we accept, base64 and base32, form decoding, TOTP, migrations, logging and HTML templates.
-
-## Still to do
-
-- Pushed authorization requests and DPoP.
-- A run of the OpenID conformance suite, and certification.
-- Fuzzing of the parsers.
-- Release builds and packages.
+We write the small parts ourselves when that is easier to review than a dependency: JWS for
+the algorithms we accept, base64 and base32, form decoding, TOTP, migrations, logging and
+HTML templates.

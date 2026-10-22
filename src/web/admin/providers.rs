@@ -7,14 +7,14 @@ use super::{Admin, checkbox, checked, danger_zone, field, notice, parse_id, text
 use crate::html::{Html, html};
 use crate::http::client::{Plain, is_valid_url};
 use crate::http::{Request, Response};
-use crate::store::providers::{self, Provider, ProviderId, ProviderKind};
-use crate::store::users::Username;
+use crate::identifier::Identifier;
+use crate::store::audit::Action;
+use crate::store::providers::{self, GOOGLE_ISSUER, Provider, ProviderId, ProviderKind};
 use crate::web::i18n::Text;
 use crate::web::layout::{Section, copy_button, error_notice, icon};
-use crate::web::providers::redirect_uri;
-use crate::web::{App, Failure};
+use crate::web::providers::{redirect_uri, secret_context};
+use crate::web::{App, Failure, is_name};
 
-const MAX_NAME_CHARS: usize = 100;
 const MAX_CLIENT_ID_LEN: usize = 200;
 
 /// `GET /admin/providers`
@@ -86,7 +86,7 @@ impl Draft {
             name: String::new(),
             slug: String::new(),
             kind: ProviderKind::Oidc,
-            issuer: "https://accounts.google.com".to_owned(),
+            issuer: GOOGLE_ISSUER.to_owned(),
             client_id: String::new(),
             domains: String::new(),
             enabled: true,
@@ -121,12 +121,12 @@ impl Draft {
         }
     }
 
-    /// The provider to save, with the secret still in plain text, or the first problem.
+    /// The provider to save, apart from its secret, or the first problem.
     fn check(&self, text: &Text, secret: &str, creating: bool) -> Result<Provider, &'static str> {
-        if self.name.is_empty() || self.name.chars().count() > MAX_NAME_CHARS {
+        if !is_name(&self.name) {
             return Err(text.name_required);
         }
-        let slug = Username::parse(&self.slug).ok_or(text.slug_invalid)?;
+        let slug = Identifier::parse(&self.slug).ok_or(text.slug_invalid)?;
         let issuer = match self.kind {
             ProviderKind::Github => None,
             ProviderKind::Oidc => {
@@ -159,7 +159,7 @@ impl Draft {
             kind: self.kind,
             issuer,
             client_id: self.client_id.clone(),
-            client_secret: secret.as_bytes().to_vec(),
+            client_secret: Vec::new(),
             auto_create_domains: domains,
             enabled: self.enabled,
         })
@@ -200,7 +200,7 @@ pub(super) async fn edit(
         let id = provider.id;
         app.db.run(move |conn| providers::delete(conn, id)).await?;
         admin
-            .record(app, request, "delete sign-in provider", &provider.name)
+            .record(app, request, Action::DeleteProvider, &provider.name)
             .await?;
         return Ok(Some(Response::redirect("/admin/providers?notice=deleted")));
     }
@@ -211,7 +211,7 @@ pub(super) async fn edit(
         .ok()
         .flatten()
         .unwrap_or_default();
-    let mut provider = match draft.check(text, secret, existing.is_none()) {
+    let provider = match draft.check(text, secret, existing.is_none()) {
         Ok(provider) => provider,
         Err(problem) => {
             return Ok(Some(form(
@@ -224,8 +224,6 @@ pub(super) async fn edit(
             )));
         }
     };
-    // The secret is sealed with the provider's row as context, so the row must exist first.
-    let plain_secret = std::mem::take(&mut provider.client_secret);
     let existing_id = existing.as_ref().map(|provider| provider.id);
     let saved = app
         .db
@@ -245,9 +243,9 @@ pub(super) async fn edit(
         }
         Err(e) => return Err(e.into()),
     };
-    store_secret(app, id, &plain_secret).await?;
+    store_secret(app, id, secret.as_bytes()).await?;
     admin
-        .record(app, request, "change sign-in provider", &draft.name)
+        .record(app, request, Action::ChangeProvider, &draft.name)
         .await?;
     Ok(Some(Response::redirect(format!(
         "/admin/providers/{}?notice=saved",
@@ -378,18 +376,9 @@ async fn store_secret(app: &App, id: ProviderId, secret: &[u8]) -> Result<(), Fa
     if secret.is_empty() {
         return Ok(());
     }
-    let sealed = app
-        .keys
-        .secrets
-        .seal(secret, format!("provider {}", id.0).as_bytes())?;
+    let sealed = app.keys.secrets.seal(secret, &secret_context(id))?;
     app.db
-        .run(move |conn| {
-            conn.execute(
-                "UPDATE providers SET client_secret = ?2 WHERE id = ?1",
-                rusqlite::params![id.0, sealed],
-            )?;
-            Ok(())
-        })
+        .run(move |conn| providers::set_secret(conn, id, &sealed))
         .await?;
     Ok(())
 }

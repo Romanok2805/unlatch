@@ -44,7 +44,9 @@ impl Csrf {
         let mut out = Html::new();
         html!(
             out,
-            "<input type=\"hidden\" name=\"csrf\" value=\"",
+            "<input type=\"hidden\" name=\"",
+            { FIELD },
+            "\" value=\"",
             { self.token },
             "\">"
         );

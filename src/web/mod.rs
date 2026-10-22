@@ -3,6 +3,7 @@
 mod account;
 mod admin;
 mod csrf;
+mod device;
 mod forward_auth;
 mod i18n;
 mod layout;
@@ -11,7 +12,6 @@ mod oidc;
 mod providers;
 mod qr;
 mod session;
-mod session_table;
 pub(crate) mod setup;
 mod signin;
 mod static_files;
@@ -32,6 +32,7 @@ use crate::http::client::Client;
 use crate::http::cookie::SetCookie;
 use crate::http::{Request, Response};
 use crate::log::error;
+use crate::store::audit::{self, Action};
 use crate::store::{Db, DbError, settings};
 
 /// Everything a request handler needs, shared by all of them.
@@ -56,9 +57,11 @@ const HASHING_SLOTS: usize = 2;
 /// Keys derived from the master key, one per purpose.
 pub(crate) struct Keys {
     pub(crate) csrf: MacKey,
-    /// Seals the state carried from the password step to the code step of a sign-in.
+    /// Seals the state a sign-in carries between its steps: from the password to the code, and
+    /// to an outside provider and back.
     pub(crate) signin: SealingKey,
-    /// Seals secrets stored in the database: TOTP seeds, provider secrets, signing keys.
+    /// Seals secrets stored in the database: TOTP seeds and the client secrets of sign-in
+    /// providers.
     pub(crate) secrets: SealingKey,
     /// Seals values a form carries to its next request, such as a TOTP seed being set up.
     pub(crate) forms: SealingKey,
@@ -186,6 +189,42 @@ impl From<CryptoError> for Failure {
     fn from(e: CryptoError) -> Self {
         Self::Crypto(e)
     }
+}
+
+/// Records an action in the audit log.
+pub(crate) async fn record_audit(
+    app: &App,
+    request: &Request,
+    actor: &str,
+    action: Action,
+    target: &str,
+) -> Result<(), Failure> {
+    let (actor, target, ip) = (
+        actor.to_owned(),
+        target.to_owned(),
+        request.client_ip.to_string(),
+    );
+    app.db
+        .run(move |conn| {
+            audit::record(
+                conn,
+                &audit::Entry {
+                    actor: &actor,
+                    action,
+                    target: &target,
+                    ip: &ip,
+                },
+            )
+        })
+        .await?;
+    Ok(())
+}
+
+/// A name people see, of a user, an application, a sign-in provider or this instance: up to 100
+/// characters of any script, without control characters, since user names travel in HTTP headers
+/// of forward authentication.
+pub(crate) fn is_name(text: &str) -> bool {
+    !text.is_empty() && text.chars().count() <= 100 && !text.chars().any(char::is_control)
 }
 
 /// `#rrggbb` in lowercase, the only form the theme accepts, so nothing else can reach the CSS.

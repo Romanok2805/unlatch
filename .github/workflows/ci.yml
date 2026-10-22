@@ -27,6 +27,9 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked
       - run: cargo test --locked
+      - run: cargo doc --no-deps --document-private-items --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
 
   fuzz:
     runs-on: ubuntu-24.04

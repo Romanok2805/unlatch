@@ -6,13 +6,15 @@ use super::{Admin, checkbox, checked, danger_zone, field, notice, parse_id, text
 use crate::crypto::{TokenHash, random_token};
 use crate::html::{Html, html};
 use crate::http::{Request, Response};
+use crate::identifier::Identifier;
+use crate::store::audit::Action;
 use crate::store::groups::{self, Group, GroupId};
-use crate::store::users::{self, NewUser, User, UserChanges, UserId, Username};
+use crate::store::users::{self, NewUser, User, UserChanges, UserId};
 use crate::time;
 use crate::web::i18n::Text;
 use crate::web::layout::{Section, copy_button, error_notice, icon, success_notice, tooltip};
 use crate::web::session::{self, Ending};
-use crate::web::{App, Failure};
+use crate::web::{App, Failure, is_name};
 
 /// Invitation and reset links work for three days.
 const LINK_LIFETIME: i64 = 3 * 24 * 60 * 60;
@@ -88,16 +90,16 @@ pub(super) async fn create(
     if request.method != Method::POST {
         return Ok(create_form(app, request, admin, None));
     }
-    let Some(username) = Username::parse(field(request, "username")) else {
+    let Some(username) = Identifier::parse(field(request, "username")) else {
         return Ok(create_form(
             app,
             request,
             admin,
-            Some(text.username_invalid),
+            Some(text.identifier_invalid),
         ));
     };
     let name = field(request, "name").to_owned();
-    if !users::display_name_ok(&name) {
+    if !is_name(&name) {
         return Ok(create_form(app, request, admin, Some(text.name_required)));
     }
     let Ok(email) = parse_email(field(request, "email")) else {
@@ -117,6 +119,7 @@ pub(super) async fn create(
                     username: &new_name,
                     display_name: &name,
                     email: email.as_deref(),
+                    email_verified: false,
                     is_admin,
                 },
             )?;
@@ -132,7 +135,7 @@ pub(super) async fn create(
         Err(e) => return Err(e.into()),
     };
     admin
-        .record(app, request, "invite user", username.as_str())
+        .record(app, request, Action::InviteUser, username.as_str())
         .await?;
     Ok(link_page(
         app,
@@ -171,7 +174,7 @@ fn create_form(app: &App, request: &Request, admin: &Admin, problem: Option<&str
         text.username,
         "username",
         field(request, "username"),
-        Some(text.username_note),
+        Some(text.identifier_note),
     );
     text_input(
         &mut content,
@@ -283,7 +286,7 @@ impl Draft {
     }
 
     fn check(&self, text: &Text) -> Result<UserChanges, &'static str> {
-        if !users::display_name_ok(&self.display_name) {
+        if !is_name(&self.display_name) {
             return Err(text.name_required);
         }
         let email = parse_email(&self.email).map_err(|()| text.email_invalid)?;
@@ -358,7 +361,7 @@ pub(super) async fn edit(
                 ));
             }
             admin
-                .record(app, request, "delete user", &user.username)
+                .record(app, request, Action::DeleteUser, &user.username)
                 .await?;
             Ok(Some(Response::redirect("/admin/users?notice=deleted")))
         }
@@ -381,7 +384,7 @@ pub(super) async fn edit(
                 return Ok(view(&draft, Some(text.keep_an_admin)));
             }
             admin
-                .record(app, request, "change user", &user.username)
+                .record(app, request, Action::ChangeUser, &user.username)
                 .await?;
             Ok(Some(Response::redirect(format!(
                 "/admin/users/{}?notice=saved",
@@ -410,7 +413,7 @@ async fn act(
                 .run(move |conn| users::create_password_link(conn, id, &hash, expires_at))
                 .await?;
             admin
-                .record(app, request, "create password link", &user.username)
+                .record(app, request, Action::CreatePasswordLink, &user.username)
                 .await?;
             Ok(link_page(
                 app,
@@ -426,7 +429,7 @@ async fn act(
                 .run(move |conn| users::set_totp(conn, id, None))
                 .await?;
             admin
-                .record(app, request, "reset two-factor sign-in", &user.username)
+                .record(app, request, Action::ResetTwoFactor, &user.username)
                 .await?;
             Ok(Response::redirect(format!(
                 "/admin/users/{}?notice=saved",
@@ -436,7 +439,7 @@ async fn act(
         _ => {
             session::end(app, Ending::AllOf(id, None)).await?;
             admin
-                .record(app, request, "end sessions", &user.username)
+                .record(app, request, Action::EndSessions, &user.username)
                 .await?;
             Ok(Response::redirect(format!(
                 "/admin/users/{}?notice=ended",

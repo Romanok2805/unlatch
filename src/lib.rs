@@ -1,7 +1,8 @@
 //! Unlatch: a small, self-hosted OpenID Connect provider.
 //!
 //! The program is a library with one public function, [`main`], so that the fuzz targets in
-//! `fuzz/` can reach the parsers through [`fuzz`]; everything else stays private to the crate.
+//! `fuzz/` can reach the parsers through the `fuzz` module, which exists only when building with
+//! `--cfg fuzzing`. Everything else stays private to the crate.
 
 mod config;
 mod crypto;
@@ -11,6 +12,7 @@ mod form;
 pub mod fuzz;
 mod html;
 mod http;
+mod identifier;
 mod log;
 mod secret;
 mod store;
@@ -55,12 +57,9 @@ pub fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
-        Some("version" | "--version" | "-V") => print(concat!(
-            "unlatch ",
-            env!("CARGO_PKG_VERSION"),
-            "
-"
-        )),
+        Some("version" | "--version" | "-V") => {
+            print(concat!("unlatch ", env!("CARGO_PKG_VERSION"), "\n"))
+        }
         Some("help" | "--help" | "-h") => print(USAGE),
         Some(other) => {
             error!("unknown command {other:?}\n\n{USAGE}");

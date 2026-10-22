@@ -10,6 +10,7 @@ Run these before opening a pull request. CI runs the same ones and fails on any 
 cargo fmt --check
 cargo clippy --all-targets --locked
 cargo test --locked
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --document-private-items --locked
 cargo deny check
 ```
 
@@ -28,6 +29,8 @@ cargo +nightly fuzz run jws
 `cargo fuzz list` names the targets. On Windows, the folder of Visual Studio's
 `clang_rt.asan_dynamic-x86_64.dll` must be on `PATH`. An input that breaks a target is saved in
 `fuzz/artifacts/`; add it as a test of the code it broke.
+
+## Conformance
 
 [conformance/](conformance/README.md) describes testing against the OpenID Foundation's suite.
 

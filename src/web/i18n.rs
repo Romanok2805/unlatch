@@ -3,6 +3,7 @@
 //! Every string is a field of [`Text`], so a missing translation doesn't compile.
 
 use crate::http::Request;
+use crate::store::audit::Action;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Lang {
@@ -14,6 +15,41 @@ pub(crate) enum Lang {
 pub(crate) const COOKIE: &str = "lang";
 
 impl Lang {
+    /// What an action in the audit log is called.
+    pub(crate) fn action(self, action: Action) -> &'static str {
+        match self {
+            Self::En => action.as_str(),
+            Self::Ru => match action {
+                Action::SignIn => "вход",
+                Action::ChangePassword => "смена пароля",
+                Action::SetPasswordFromLink => "пароль по ссылке",
+                Action::TurnOnTwoFactor => "включение двухфакторного входа",
+                Action::TurnOffTwoFactor => "выключение двухфакторного входа",
+                Action::CreateAdministrator => "создание администратора",
+                Action::CreateApplication => "создание приложения",
+                Action::ChangeApplication => "изменение приложения",
+                Action::DeleteApplication => "удаление приложения",
+                Action::IssueClientSecret => "новый секрет клиента",
+                Action::InviteUser => "приглашение пользователя",
+                Action::ChangeUser => "изменение пользователя",
+                Action::DeleteUser => "удаление пользователя",
+                Action::CreatePasswordLink => "ссылка для пароля",
+                Action::ResetTwoFactor => "сброс двухфакторного входа",
+                Action::EndSessions => "завершение сеансов",
+                Action::EndSession => "завершение сеанса",
+                Action::CreateGroup => "создание группы",
+                Action::RenameGroup => "переименование группы",
+                Action::DeleteGroup => "удаление группы",
+                Action::ChangeSettings => "изменение настроек",
+                Action::ChangeProvider => "изменение внешнего входа",
+                Action::DeleteProvider => "удаление внешнего входа",
+                Action::LinkProvider => "привязка внешнего входа",
+                Action::UnlinkProvider => "отвязка внешнего входа",
+                Action::CreateUserFromProvider => "создание пользователя через внешний вход",
+            },
+        }
+    }
+
     /// The language picked in the footer, else the first supported one the browser asks for.
     pub(crate) fn of(request: &Request) -> Self {
         if let Some(lang) = request.cookie(COOKIE).and_then(Self::from_code) {
@@ -110,8 +146,8 @@ pub(crate) struct Text {
     pub(crate) setup_title: &'static str,
     pub(crate) display_name: &'static str,
     pub(crate) create: &'static str,
-    pub(crate) username_note: &'static str,
-    pub(crate) username_invalid: &'static str,
+    pub(crate) identifier_note: &'static str,
+    pub(crate) identifier_invalid: &'static str,
     pub(crate) name_required: &'static str,
     pub(crate) set_password_title: &'static str,
     pub(crate) link_expired: &'static str,
@@ -179,7 +215,7 @@ pub(crate) struct Text {
     pub(crate) credentials: &'static str,
     pub(crate) client_secret: &'static str,
     pub(crate) secret_shown_once: &'static str,
-    pub(crate) continue_setup: &'static str,
+    pub(crate) proceed: &'static str,
     pub(crate) client_id_invalid: &'static str,
     pub(crate) client_id_taken: &'static str,
     pub(crate) redirect_uris: &'static str,
@@ -310,8 +346,8 @@ static EN: Text = Text {
     setup_title: "First administrator",
     display_name: "Name",
     create: "Create",
-    username_note: "Lowercase letters, digits, dots and dashes",
-    username_invalid: "Use lowercase letters, digits, dots and dashes",
+    identifier_note: "Lowercase letters, digits, dots, dashes and underscores",
+    identifier_invalid: "Use lowercase letters, digits, dots, dashes and underscores",
     name_required: "Enter a name of up to 100 characters",
     set_password_title: "New password",
     link_expired: "This link has expired or was already used",
@@ -379,8 +415,8 @@ static EN: Text = Text {
     credentials: "Credentials",
     client_secret: "Client secret",
     secret_shown_once: "The secret is shown only now. Copy it to the application.",
-    continue_setup: "Continue",
-    client_id_invalid: "Client ID: lowercase letters, digits, dots and dashes",
+    proceed: "Continue",
+    client_id_invalid: "Client ID: lowercase letters, digits, dots, dashes and underscores",
     client_id_taken: "This Client ID is taken",
     redirect_uris: "Redirect URIs",
     post_logout_uris: "Addresses after sign-out",
@@ -428,7 +464,7 @@ static EN: Text = Text {
     accent: "Accent colour",
     colour_invalid: "Pick a colour",
     uri_too_long: "The address is too long",
-    uri_whitespace: "The address contains spaces",
+    uri_whitespace: "The address contains spaces or backslashes",
     uri_fragment: "The address can't contain #",
     uri_no_host: "The address has no host",
     uri_plain_http: "Use https; plain http only for 127.0.0.1 and [::1]",
@@ -448,8 +484,8 @@ static EN: Text = Text {
     unlink: "Unlink",
     new_provider: "New sign-in provider",
     slug: "Short name",
-    slug_note: "Part of the address: lowercase letters, digits, dots and dashes",
-    slug_invalid: "Short name: lowercase letters, digits, dots and dashes",
+    slug_note: "Part of the address: lowercase letters, digits, dots, dashes and underscores",
+    slug_invalid: "Short name: lowercase letters, digits, dots, dashes and underscores",
     slug_taken: "This short name is taken",
     issuer_note: "For OpenID Connect, such as https://accounts.google.com",
     issuer_invalid: "Enter the provider's https address without a trailing slash",
@@ -510,8 +546,8 @@ static RU: Text = Text {
     setup_title: "Первый администратор",
     display_name: "Имя",
     create: "Создать",
-    username_note: "Строчные латинские буквы, цифры, точки и дефисы",
-    username_invalid: "Только строчные латинские буквы, цифры, точки и дефисы",
+    identifier_note: "Строчные латинские буквы, цифры, точки, дефисы и подчёркивания",
+    identifier_invalid: "Только строчные латинские буквы, цифры, точки, дефисы и подчёркивания",
     name_required: "Введите имя до 100 символов",
     set_password_title: "Новый пароль",
     link_expired: "Ссылка устарела или уже использована",
@@ -579,8 +615,8 @@ static RU: Text = Text {
     credentials: "Данные для подключения",
     client_secret: "Секрет клиента",
     secret_shown_once: "Секрет показан только сейчас. Скопируйте его в приложение.",
-    continue_setup: "Продолжить",
-    client_id_invalid: "Client ID: строчные латинские буквы, цифры, точки и дефисы",
+    proceed: "Продолжить",
+    client_id_invalid: "Client ID: строчные латинские буквы, цифры, точки, дефисы и подчёркивания",
     client_id_taken: "Этот Client ID уже занят",
     redirect_uris: "Адреса возврата",
     post_logout_uris: "Адреса после выхода",
@@ -628,7 +664,7 @@ static RU: Text = Text {
     accent: "Акцентный цвет",
     colour_invalid: "Выберите цвет",
     uri_too_long: "Адрес слишком длинный",
-    uri_whitespace: "В адресе есть пробелы",
+    uri_whitespace: "В адресе есть пробелы или обратные косые черты",
     uri_fragment: "В адресе не может быть #",
     uri_no_host: "В адресе нет хоста",
     uri_plain_http: "Нужен https; http только для 127.0.0.1 и [::1]",
@@ -648,8 +684,8 @@ static RU: Text = Text {
     unlink: "Отвязать",
     new_provider: "Новый внешний вход",
     slug: "Короткое имя",
-    slug_note: "Часть адреса: строчные латинские буквы, цифры, точки и дефисы",
-    slug_invalid: "Короткое имя: строчные латинские буквы, цифры, точки и дефисы",
+    slug_note: "Часть адреса: строчные латинские буквы, цифры, точки, дефисы и подчёркивания",
+    slug_invalid: "Короткое имя: строчные латинские буквы, цифры, точки, дефисы и подчёркивания",
     slug_taken: "Это короткое имя уже занято",
     issuer_note: "Для OpenID Connect, например https://accounts.google.com",
     issuer_invalid: "Укажите https-адрес провайдера без косой черты в конце",

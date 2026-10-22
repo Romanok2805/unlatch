@@ -21,7 +21,7 @@ pub(crate) fn subject(app: &App, user: UserId) -> String {
 }
 
 /// What we tell applications about a user, limited to the granted scopes.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize)]
 pub(crate) struct UserClaims {
     pub(crate) sub: String,
     #[serde(skip_serializing_if = "Option::is_none")]

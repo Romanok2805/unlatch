@@ -49,7 +49,7 @@ string_slice = "deny"
 # Overflow and lossy casts must be handled explicitly (checked_*, try_from).
 arithmetic_side_effects = "deny"
 as_conversions = "deny"
-# Output goes through the logger, which redacts secrets.
+# Output goes through the logger, which writes only values our code chose.
 print_stdout = "deny"
 print_stderr = "deny"
 dbg_macro = "deny"

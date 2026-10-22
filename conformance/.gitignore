@@ -1,3 +1,8 @@
-# Written by config.py and the test runner.
+# What the steps in README.md create here.
 /unlatch.json
 /results/
+/docker-compose-prebuilt.yml
+/conformance.key
+/conformance.db*
+/cert.pem
+/key.pem

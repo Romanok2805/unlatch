@@ -1,7 +1,7 @@
 # OpenID conformance
 
-Unlatch is tested with the [OpenID Foundation's conformance suite](https://gitlab.com/openid/conformance-suite),
-run locally. It is not certified.
+Unlatch is tested with the OpenID Foundation's
+[conformance suite](https://gitlab.com/openid/conformance-suite), run locally. It is not certified.
 
 ## Results
 
@@ -49,15 +49,17 @@ its outgoing requests, and the suite's endpoint has a self-signed certificate.
    to the host's loopback.
 
    ```sh
+   unlatch generate-key > conformance.key
    UNLATCH_ISSUER=https://host.docker.internal:9443 UNLATCH_LISTEN=127.0.0.1:9443 \
    UNLATCH_TLS_CERT=cert.pem UNLATCH_TLS_KEY=key.pem \
    UNLATCH_KEY_FILE=conformance.key UNLATCH_DATABASE=conformance.db unlatch
    ```
 
-3. In administration, add the user `tester` with the password `conformance suite password` and an
-   email address, and leave two-factor sign-in off: the suite's browser can't enter codes. Add two
-   OpenID Connect applications for everyone, with *Don't ask* on and *Require PKCE* off, since the
-   suite sends PKCE in only one test. Both get these addresses:
+3. In administration, invite the user `tester` with an email address, open the invitation link
+   and set the password `conformance suite password`. Leave two-factor sign-in off: the suite's
+   browser can't enter codes. Add two OpenID Connect applications for everyone, with *Don't
+   ask* on and *Require PKCE* off, since the suite sends PKCE in only one test. Both get
+   these addresses:
 
    - redirect URI `https://localhost.emobix.co.uk:8443/test/a/unlatch/callback`
    - post-logout URI `https://localhost.emobix.co.uk:8443/test/a/unlatch/post_logout_redirect`
@@ -68,11 +70,11 @@ its outgoing requests, and the suite's endpoint has a self-signed certificate.
    python config.py <client id> <secret> <second client id> <second secret>
    ```
 
-5. Run the plans with `scripts/run-test-plan.py` from a checkout of the suite, which needs the
-   Python packages in its `scripts/requirements.txt`:
+5. In this directory, run the plans with `scripts/run-test-plan.py` from a checkout of the suite,
+   which needs the Python packages in its `scripts/requirements.txt`:
 
    ```sh
-   python run-test-plan.py --export-dir results \
+   python <suite>/scripts/run-test-plan.py --export-dir results \
      "oidcc-basic-certification-test-plan[server_metadata=discovery][client_registration=static_client]" unlatch.json \
      oidcc-config-certification-test-plan unlatch.json \
      "oidcc-formpost-basic-certification-test-plan[server_metadata=discovery][client_registration=static_client]" unlatch.json \

@@ -1,4 +1,4 @@
-//! The stylesheet and icons, compiled into the binary.
+//! The stylesheet, script and icons, compiled into the binary.
 //!
 //! Their URLs contain a hash of their contents, so browsers can cache them for good and still
 //! fetch new versions after an upgrade.

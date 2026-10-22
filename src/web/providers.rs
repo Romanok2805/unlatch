@@ -15,7 +15,7 @@ use super::csrf;
 use super::i18n::Lang;
 use super::layout::auth_page;
 use super::signin::after_provider;
-use super::{App, Failure, is_local_path, session};
+use super::{App, Failure, is_local_path, record_audit, session};
 use crate::crypto::{VerifyingKey, constant_time_eq, random_token, sha256, verify_jwt};
 use crate::encoding::{base64url, decode_base64url};
 use crate::form::encode_pairs;
@@ -23,10 +23,11 @@ use crate::html::{Html, html};
 use crate::http::client::Plain;
 use crate::http::cookie::{self, SetCookie};
 use crate::http::{Request, Response};
+use crate::identifier::Identifier;
 use crate::log::{info, warning};
-use crate::store::audit;
-use crate::store::providers::{self, Provider, ProviderKind};
-use crate::store::users::{self, NewUser, User, UserId, Username};
+use crate::store::audit::Action;
+use crate::store::providers::{self, Provider, ProviderId, ProviderKind};
+use crate::store::users::{self, NewUser, User, UserId};
 use crate::time;
 
 const FLOW_COOKIE: &str = "provider";
@@ -79,12 +80,6 @@ struct Identity {
     email_verified: bool,
     name: Option<String>,
     hosted_domain: Option<String>,
-}
-
-fn callback_url(app: &App, provider: &Provider) -> String {
-    app.config
-        .issuer
-        .url(&format!("/login/{}/callback", provider.slug))
 }
 
 /// The URL to register at the provider as the redirect URI.
@@ -156,11 +151,11 @@ pub(crate) async fn manage(app: &App, request: &Request) -> Result<Response, Fai
         app.db
             .run(move |conn| providers::unlink(conn, id, user))
             .await?;
-        record(
+        record_audit(
             app,
             request,
             &current.user.username,
-            "unlink sign-in provider",
+            Action::UnlinkProvider,
             &provider.name,
         )
         .await?;
@@ -192,7 +187,7 @@ async fn begin(
         link_user: link_user.map(|user| user.0),
         issued_at: time::now(),
     };
-    let redirect_uri = callback_url(app, provider);
+    let redirect_uri = redirect_uri(app, &provider.slug);
     let location = match provider.kind {
         ProviderKind::Github => {
             let query = encode_pairs([
@@ -231,7 +226,7 @@ async fn begin(
         serde_json::to_vec(&flow).map_err(|_| Failure::Crypto(crate::crypto::CryptoError))?;
     let sealed = base64url(&app.keys.signin.seal(&json, FLOW_COOKIE.as_bytes())?);
     let secure = app.config.issuer.is_secure();
-    // Lax, because the provider sends the browser back with a top-level navigation.
+    // Cookies are Lax, so this one comes back with the provider's top-level redirect.
     let cookie = SetCookie {
         name: &cookie::name(FLOW_COOKIE, secure),
         value: &sealed,
@@ -316,12 +311,16 @@ fn clear_flow(app: &App, response: Response) -> Response {
     response.cookie(&cookie, secure)
 }
 
+/// Binds a sealed client secret to its provider's row, so it can't be moved to another one.
+pub(crate) fn secret_context(id: ProviderId) -> Vec<u8> {
+    format!("provider {}", id.0).into_bytes()
+}
+
 fn client_secret(app: &App, provider: &Provider) -> Option<String> {
-    let context = format!("provider {}", provider.id.0);
     let secret = app
         .keys
         .secrets
-        .open(&provider.client_secret, context.as_bytes())?;
+        .open(&provider.client_secret, &secret_context(provider.id))?;
     String::from_utf8(secret.expose().clone()).ok()
 }
 
@@ -429,7 +428,7 @@ async fn oidc_identity(
 ) -> Result<Identity, String> {
     let discovery = discovery(app, provider).await?;
     let secret = client_secret(app, provider).ok_or("the client secret can't be read")?;
-    let redirect_uri = callback_url(app, provider);
+    let redirect_uri = redirect_uri(app, &provider.slug);
     let mut form = vec![
         ("grant_type", "authorization_code"),
         ("code", code),
@@ -509,7 +508,7 @@ async fn github_identity(app: &App, provider: &Provider, code: &str) -> Result<I
         verified: bool,
     }
     let secret = client_secret(app, provider).ok_or("the client secret can't be read")?;
-    let redirect_uri = callback_url(app, provider);
+    let redirect_uri = redirect_uri(app, &provider.slug);
     let form = [
         ("client_id", provider.client_id.as_str()),
         ("client_secret", secret.as_str()),
@@ -571,11 +570,11 @@ async fn resolve(
         app.db
             .run(move |conn| providers::link(conn, provider_id, &subject, user_id))
             .await?;
-        record(
+        record_audit(
             app,
             request,
             &current.user.username,
-            "link sign-in provider",
+            Action::LinkProvider,
             &provider.name,
         )
         .await?;
@@ -619,7 +618,7 @@ async fn create_account(
     }
     // A personal Google account can carry a verified address of a company domain, for example
     // one kept after leaving. Only an account of the company's Workspace has `hd` set to it.
-    let google = provider.issuer.as_deref() == Some("https://accounts.google.com");
+    let google = provider.is_google();
     if google && identity.hosted_domain.as_deref() != Some(domain.as_str()) {
         return Ok(None);
     }
@@ -628,7 +627,7 @@ async fn create_account(
         .chars()
         .filter(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '-' | '_'))
         .skip_while(|c| !c.is_ascii_alphanumeric())
-        .take(Username::MAX_LEN.saturating_sub(4))
+        .take(Identifier::MAX_LEN.saturating_sub(4))
         .collect();
     let base = if base.is_empty() {
         "user".to_owned()
@@ -660,7 +659,7 @@ async fn create_account(
                 } else {
                     format!("{base}{suffix}")
                 };
-                let Some(username) = Username::parse(&candidate) else {
+                let Some(username) = Identifier::parse(&candidate) else {
                     continue;
                 };
                 if users::by_username(conn, username.as_str())?.is_some() {
@@ -670,10 +669,10 @@ async fn create_account(
                     username: &username,
                     display_name: &display_name,
                     email: Some(&email),
+                    email_verified: true,
                     is_admin: false,
                 };
                 let id = users::create(conn, &new)?;
-                conn.execute("UPDATE users SET email_verified = 1 WHERE id = ?1", [id.0])?;
                 providers::link(conn, provider_id, &subject, id)?;
                 return users::by_id(conn, id);
             }
@@ -681,44 +680,16 @@ async fn create_account(
         })
         .await?;
     if let Some(user) = &created {
-        record(
+        record_audit(
             app,
             request,
             &user.username,
-            "create user from provider",
+            Action::CreateUserFromProvider,
             &provider.name,
         )
         .await?;
     }
     Ok(created)
-}
-
-async fn record(
-    app: &App,
-    request: &Request,
-    actor: &str,
-    action: &'static str,
-    target: &str,
-) -> Result<(), Failure> {
-    let (actor, target, ip) = (
-        actor.to_owned(),
-        target.to_owned(),
-        request.client_ip.to_string(),
-    );
-    app.db
-        .run(move |conn| {
-            audit::record(
-                conn,
-                &audit::Entry {
-                    actor: &actor,
-                    action,
-                    target: &target,
-                    ip: &ip,
-                },
-            )
-        })
-        .await?;
-    Ok(())
 }
 
 /// A sign-in with the provider failed; the reason goes to the log, not to the page.

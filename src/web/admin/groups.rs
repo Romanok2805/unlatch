@@ -5,8 +5,9 @@ use hyper::Method;
 use super::{Admin, danger_zone, field, notice, parse_id, text_input};
 use crate::html::{Html, html};
 use crate::http::{Request, Response};
+use crate::identifier::Identifier;
+use crate::store::audit::Action;
 use crate::store::groups::{self, GroupId};
-use crate::store::users::Username;
 use crate::web::layout::{Section, error_notice, icon};
 use crate::web::{App, Failure};
 
@@ -17,8 +18,8 @@ pub(super) async fn list(app: &App, request: &Request, admin: &Admin) -> Result<
     if request.method == Method::POST {
         // Group names follow the rules for user names: they travel in tokens and are compared
         // by applications, so they need one unambiguous spelling.
-        match Username::parse(field(request, "name")) {
-            None => problem = Some(text.username_invalid),
+        match Identifier::parse(field(request, "name")) {
+            None => problem = Some(text.identifier_invalid),
             Some(name) => {
                 let created = app
                     .db
@@ -27,7 +28,7 @@ pub(super) async fn list(app: &App, request: &Request, admin: &Admin) -> Result<
                 match created {
                     Ok(_) => {
                         admin
-                            .record(app, request, "create group", field(request, "name"))
+                            .record(app, request, Action::CreateGroup, field(request, "name"))
                             .await?;
                         return Ok(Response::redirect("/admin/groups?notice=saved"));
                     }
@@ -81,7 +82,7 @@ pub(super) async fn list(app: &App, request: &Request, admin: &Admin) -> Result<
         text.name,
         "name",
         "",
-        Some(text.username_note),
+        Some(text.identifier_note),
     );
     html!(
         content,
@@ -193,12 +194,12 @@ async fn change(
     if field(request, "action") == "delete" {
         app.db.run(move |conn| groups::delete(conn, id)).await?;
         admin
-            .record(app, request, "delete group", &group.name)
+            .record(app, request, Action::DeleteGroup, &group.name)
             .await?;
         return Ok(Ok(Response::redirect("/admin/groups?notice=deleted")));
     }
-    let Some(name) = Username::parse(field(request, "name")) else {
-        return Ok(Err(text.username_invalid));
+    let Some(name) = Identifier::parse(field(request, "name")) else {
+        return Ok(Err(text.identifier_invalid));
     };
     match app
         .db
@@ -207,7 +208,7 @@ async fn change(
     {
         Ok(()) => {
             admin
-                .record(app, request, "rename group", &group.name)
+                .record(app, request, Action::RenameGroup, &group.name)
                 .await?;
             Ok(Ok(Response::redirect(format!(
                 "/admin/groups/{}?notice=saved",

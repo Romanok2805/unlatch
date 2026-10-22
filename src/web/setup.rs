@@ -5,12 +5,14 @@ use super::csrf::{self, Csrf};
 use super::i18n::Lang;
 use super::layout::{auth_page, error_notice, success_notice};
 use super::signin::{SignedIn, hash_password};
-use super::{App, Failure, session};
+use super::{App, Failure, is_name, session};
 use crate::crypto::{TokenHash, random_token};
 use crate::encoding::{base64url, decode_base64url};
 use crate::html::{Html, html};
 use crate::http::{Request, Response};
-use crate::store::users::{self, NewUser, Username};
+use crate::identifier::Identifier;
+use crate::store::audit::Action;
+use crate::store::users::{self, NewUser};
 use crate::store::{audit, settings};
 use crate::time;
 
@@ -97,7 +99,7 @@ fn setup_form(app: &App, request: &Request, problem: Option<&str>) -> Result<Res
         { field("username") },
         "\" autocomplete=\"username\" autocapitalize=\"none\" spellcheck=\"false\" maxlength=\"64\" ",
         "required><p class=\"field-note\">",
-        { text.username_note },
+        { text.identifier_note },
         "</p></div>",
         { new_password_fields(text) },
         "<button class=\"primary block\">",
@@ -125,10 +127,10 @@ pub(super) async fn setup_submit(
         return setup_form(app, request, Some(text.form_expired)).map(Some);
     }
     let name = field("name").trim().to_owned();
-    let Some(username) = Username::parse(field("username").trim()) else {
-        return setup_form(app, request, Some(text.username_invalid)).map(Some);
+    let Some(username) = Identifier::parse(field("username").trim()) else {
+        return setup_form(app, request, Some(text.identifier_invalid)).map(Some);
     };
-    if !users::display_name_ok(&name) {
+    if !is_name(&name) {
         return setup_form(app, request, Some(text.name_required)).map(Some);
     }
     if let Some(problem) = password_problem(text, username.as_str(), field("new"), field("repeat"))
@@ -149,6 +151,7 @@ pub(super) async fn setup_submit(
                 username: &username,
                 display_name: &name,
                 email: None,
+                email_verified: false,
                 is_admin: true,
             };
             let id = users::create(conn, &new)?;
@@ -159,7 +162,7 @@ pub(super) async fn setup_submit(
                 conn,
                 &audit::Entry {
                     actor: "setup token",
-                    action: "create administrator",
+                    action: Action::CreateAdministrator,
                     target: username.as_str(),
                     ip: &ip,
                 },
@@ -262,7 +265,7 @@ pub(super) async fn link_submit(app: &App, request: &Request) -> Result<Response
                 conn,
                 &audit::Entry {
                     actor: &user.username,
-                    action: "set password from link",
+                    action: Action::SetPasswordFromLink,
                     target: &user.username,
                     ip: &ip,
                 },

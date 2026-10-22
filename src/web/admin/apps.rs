@@ -9,15 +9,14 @@ use crate::crypto::{Algorithm, random_token, sha256};
 use crate::html::{Html, html};
 use crate::http::client::{Plain, is_valid_url};
 use crate::http::{Request, Response};
+use crate::identifier::Identifier;
 use crate::store::apps::{self, AppChanges, AppId, AppRecord, Kind};
+use crate::store::audit::Action;
 use crate::store::groups::{self, Group, GroupId};
-use crate::store::users::Username;
 use crate::uri::{InvalidRedirectUri, RedirectUri};
 use crate::web::i18n::Text;
 use crate::web::layout::{Section, copy_button, error_notice, icon, tooltip};
-use crate::web::{App, Failure};
-
-const MAX_NAME_CHARS: usize = 100;
+use crate::web::{App, Failure, is_name};
 
 /// `GET /admin/apps`
 pub(super) async fn list(app: &App, request: &Request, admin: &Admin) -> Result<Response, Failure> {
@@ -96,25 +95,14 @@ pub(super) async fn create(
     if request.method != Method::POST {
         return Ok(create_form(app, request, admin, proxy, None));
     }
+    let refuse = |problem| Ok(create_form(app, request, admin, proxy, Some(problem)));
     let name = field(request, "name").to_owned();
-    if name.is_empty() || name.chars().count() > MAX_NAME_CHARS {
-        return Ok(create_form(
-            app,
-            request,
-            admin,
-            proxy,
-            Some(text.name_required),
-        ));
+    if !is_name(&name) {
+        return refuse(text.name_required);
     }
     if proxy {
         let Some(host) = parse_host(field(request, "host")) else {
-            return Ok(create_form(
-                app,
-                request,
-                admin,
-                proxy,
-                Some(text.host_invalid),
-            ));
+            return refuse(text.host_invalid);
         };
         let created = app
             .db
@@ -123,29 +111,22 @@ pub(super) async fn create(
         return match created {
             Ok(id) => {
                 admin
-                    .record(app, request, "create application", field(request, "name"))
+                    .record(
+                        app,
+                        request,
+                        Action::CreateApplication,
+                        field(request, "name"),
+                    )
                     .await?;
                 Ok(Response::redirect(format!("/admin/apps/{}", id.0)))
             }
-            Err(e) if e.is_constraint_violation() => Ok(create_form(
-                app,
-                request,
-                admin,
-                proxy,
-                Some(text.host_taken),
-            )),
+            Err(e) if e.is_constraint_violation() => refuse(text.host_taken),
             Err(e) => Err(e.into()),
         };
     }
 
-    let Some(client_id) = Username::parse(field(request, "client_id")) else {
-        return Ok(create_form(
-            app,
-            request,
-            admin,
-            proxy,
-            Some(text.client_id_invalid),
-        ));
+    let Some(client_id) = Identifier::parse(field(request, "client_id")) else {
+        return refuse(text.client_id_invalid);
     };
     let secret = if checked(request, "public") {
         None
@@ -163,18 +144,17 @@ pub(super) async fn create(
     let id = match created {
         Ok(id) => id,
         Err(e) if e.is_constraint_violation() => {
-            return Ok(create_form(
-                app,
-                request,
-                admin,
-                proxy,
-                Some(text.client_id_taken),
-            ));
+            return refuse(text.client_id_taken);
         }
         Err(e) => return Err(e.into()),
     };
     admin
-        .record(app, request, "create application", field(request, "name"))
+        .record(
+            app,
+            request,
+            Action::CreateApplication,
+            field(request, "name"),
+        )
         .await?;
     Ok(credentials_page(
         app,
@@ -248,7 +228,7 @@ fn create_form(
             "Client ID",
             "client_id",
             field(request, "client_id"),
-            Some(text.username_note),
+            Some(text.identifier_note),
         );
         checkbox(
             &mut content,
@@ -299,7 +279,7 @@ fn credentials_page(
         "<a class=\"button primary\" href=\"/admin/apps/",
         { id.0 },
         "\">",
-        { text.continue_setup },
+        { text.proceed },
         "</a></div>"
     );
     admin.page(app, Section::Apps, text.credentials, &content)
@@ -385,7 +365,7 @@ impl Draft {
 
     /// The draft as changes to save, or a message about its first problem.
     fn check(&self, kind: Kind, text: &Text) -> Result<AppChanges, String> {
-        if self.name.is_empty() || self.name.chars().count() > MAX_NAME_CHARS {
+        if !is_name(&self.name) {
             return Err(text.name_required.to_owned());
         }
         let host = match kind {
@@ -481,7 +461,7 @@ pub(super) async fn edit(
         "delete" => {
             app.db.run(move |conn| apps::delete(conn, id)).await?;
             admin
-                .record(app, request, "delete application", &record.name)
+                .record(app, request, Action::DeleteApplication, &record.name)
                 .await?;
             Ok(Some(Response::redirect("/admin/apps?notice=deleted")))
         }
@@ -492,7 +472,7 @@ pub(super) async fn edit(
                 .run(move |conn| apps::set_secret(conn, id, &hash))
                 .await?;
             admin
-                .record(app, request, "issue client secret", &record.name)
+                .record(app, request, Action::IssueClientSecret, &record.name)
                 .await?;
             let client_id = record.client_id.clone().unwrap_or_default();
             Ok(Some(credentials_page(
@@ -521,7 +501,7 @@ pub(super) async fn edit(
                 Err(e) => return Err(e.into()),
             }
             admin
-                .record(app, request, "change application", &draft.name)
+                .record(app, request, Action::ChangeApplication, &draft.name)
                 .await?;
             Ok(Some(Response::redirect(format!(
                 "/admin/apps/{}?notice=saved",
