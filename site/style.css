@@ -179,6 +179,14 @@ main li + li {
   margin-top: 0.25rem;
 }
 
+main img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
 code {
   font-family: var(--mono);
   font-size: 0.875em;

@@ -9,7 +9,7 @@ use std::error::Error;
 use std::fs;
 use std::path::Path;
 
-use pulldown_cmark::{CowStr, Event, HeadingLevel, Options, Parser, Tag, html};
+use pulldown_cmark::{CowStr, Event, HeadingLevel, Options, Parser, Tag, TagEnd, html};
 
 const REPOSITORY: &str = "https://github.com/Romanok2805/unlatch";
 
@@ -33,6 +33,8 @@ struct Page {
     /// The text of the first paragraph, for search engines.
     summary: String,
     html: String,
+    /// Images in the repository that the page shows, copied to the same paths on the site.
+    images: Vec<String>,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -68,15 +70,23 @@ fn main() -> Result<(), Box<dyn Error>> {
         fs::create_dir_all(&dir)?;
         fs::write(dir.join("index.html"), html)?;
     }
+    for image in pages.iter().flat_map(|page| &page.images) {
+        let target = out.join(image);
+        if let Some(dir) = target.parent() {
+            fs::create_dir_all(dir)?;
+        }
+        fs::copy(root.join(image), target).map_err(|error| format!("{image}: {error}"))?;
+    }
     fs::write(out.join("style.css"), STYLE)?;
     Ok(())
 }
 
 fn render(source: &str, address: &'static str, markdown: &str) -> Page {
-    let mut events: Vec<Event<'_>> = Parser::new_ext(markdown, Options::ENABLE_TABLES).collect();
+    let mut events = without_badges(Parser::new_ext(markdown, Options::ENABLE_TABLES).collect());
     let mut title = None;
     let mut summary = None;
     let mut ids: Vec<String> = Vec::new();
+    let mut images = Vec::new();
 
     for i in 0..events.len() {
         let text = match &events[i] {
@@ -104,6 +114,11 @@ fn render(source: &str, address: &'static str, markdown: &str) -> Page {
             Event::Start(Tag::Link { dest_url, .. }) => {
                 *dest_url = CowStr::from(link(source, dest_url));
             }
+            Event::Start(Tag::Image { dest_url, .. }) if !dest_url.contains(':') => {
+                let path = resolve(source, dest_url);
+                *dest_url = CowStr::from(format!("/{path}"));
+                images.push(path);
+            }
             _ => {}
         }
     }
@@ -115,6 +130,7 @@ fn render(source: &str, address: &'static str, markdown: &str) -> Page {
         title: title.unwrap_or_else(|| source.to_owned()),
         summary: summary.unwrap_or_default(),
         html,
+        images,
     }
 }
 
@@ -151,18 +167,7 @@ fn link(source: &str, dest: &str) -> String {
     let (path, fragment) = dest
         .split_once('#')
         .map_or((dest, None), |(p, f)| (p, Some(f)));
-    let mut parts: Vec<&str> = source.split('/').collect();
-    parts.pop();
-    for part in path.split('/') {
-        match part {
-            ".." => {
-                parts.pop();
-            }
-            "." | "" => {}
-            part => parts.push(part),
-        }
-    }
-    let target = parts.join("/");
+    let target = resolve(source, path);
     let mut url = PAGES
         .iter()
         .find(|(source, _)| *source == target)
@@ -175,6 +180,64 @@ fn link(source: &str, dest: &str) -> String {
         url.push_str(fragment);
     }
     url
+}
+
+/// The file in the repository that `path`, written in `source`, points to.
+fn resolve(source: &str, path: &str) -> String {
+    let mut parts: Vec<&str> = source.split('/').collect();
+    parts.pop();
+    for part in path.split('/') {
+        match part {
+            ".." => {
+                parts.pop();
+            }
+            "." | "" => {}
+            part => parts.push(part),
+        }
+    }
+    parts.join("/")
+}
+
+/// Leaves out paragraphs made only of linked images: the badges at the top of the README are for
+/// GitHub, and the site already leads to the same places.
+fn without_badges(events: Vec<Event<'_>>) -> Vec<Event<'_>> {
+    let mut kept = Vec::with_capacity(events.len());
+    let mut rest = events.into_iter();
+    while let Some(event) = rest.next() {
+        if !matches!(event, Event::Start(Tag::Paragraph)) {
+            kept.push(event);
+            continue;
+        }
+        let paragraph: Vec<Event<'_>> = rest
+            .by_ref()
+            .take_while(|event| !matches!(event, Event::End(TagEnd::Paragraph)))
+            .collect();
+        if !is_badges(&paragraph) {
+            kept.push(event);
+            kept.extend(paragraph);
+            kept.push(Event::End(TagEnd::Paragraph));
+        }
+    }
+    kept
+}
+
+fn is_badges(paragraph: &[Event<'_>]) -> bool {
+    let (mut in_link, mut in_image, mut images) = (false, false, 0);
+    for event in paragraph {
+        match event {
+            Event::Start(Tag::Link { .. }) => in_link = true,
+            Event::End(TagEnd::Link) => in_link = false,
+            Event::Start(Tag::Image { .. }) if in_link => {
+                in_image = true;
+                images += 1;
+            }
+            Event::End(TagEnd::Image) => in_image = false,
+            Event::Text(_) if in_image => {}
+            Event::SoftBreak => {}
+            _ => return false,
+        }
+    }
+    images > 0
 }
 
 fn menu(pages: &[Page], current: &str) -> String {

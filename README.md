@@ -1,10 +1,20 @@
 # Unlatch
 
+[![CI](https://github.com/Romanok2805/unlatch/actions/workflows/ci.yml/badge.svg)](https://github.com/Romanok2805/unlatch/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/unlatch)](https://crates.io/crates/unlatch)
+[![Rust](https://img.shields.io/crates/msrv/unlatch)](https://crates.io/crates/unlatch)
+[![Documentation](https://img.shields.io/badge/docs-unlatch.dev-2d6a5f)](https://unlatch.dev)
+[![License](https://img.shields.io/crates/l/unlatch)](LICENSE)
+
 Unlatch is a single sign-on server you host yourself. It speaks OpenID Connect, so people sign in
 once and can then use every service you connect to it, such as Grafana, Forgejo or Nextcloud. It is
 written in Rust with few dependencies and runs as one binary with one SQLite file.
 
 Unlatch is young: it hasn't been audited or certified yet.
+
+![The sign-in page](docs/images/signin.png)
+
+![Applications in the web interface](docs/images/applications.png)
 
 ## Features
 
