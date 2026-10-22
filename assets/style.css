@@ -32,6 +32,11 @@
   box-sizing: border-box;
 }
 
+/* Buttons set their own display, which would otherwise show those the script hasn't shown yet. */
+[hidden] {
+  display: none !important;
+}
+
 html {
   text-size-adjust: 100%;
 }
@@ -428,6 +433,10 @@ div.has-tip:has(> .check, > form, > button:not(.block)) {
   margin-top: 0.625rem;
 }
 
+.auth .alternatives form {
+  margin-top: 0;
+}
+
 .auth .alternatives a:not(.button) {
   display: flex;
   align-items: center;
@@ -472,8 +481,13 @@ div.has-tip:has(> .check, > form, > button:not(.block)) {
   margin-top: 2rem;
 }
 
-.rows li > :last-child {
+/* A row is an icon, a label and sometimes an action, which goes to the end. */
+.rows li > :nth-child(3) {
   margin-left: auto;
+}
+
+.rows form {
+  margin-top: 0;
 }
 
 /* Scanners need dark modules on a light background, in either theme. */

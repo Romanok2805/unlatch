@@ -159,6 +159,15 @@ impl Issuer {
     pub(crate) fn is_secure(&self) -> bool {
         self.secure
     }
+
+    /// The host name without the port, which passkeys are tied to. Passkeys need a domain, so
+    /// an IP address has none.
+    pub(crate) fn domain(&self) -> Option<&str> {
+        let host = self.origin.split_once("://").map_or("", |(_, host)| host);
+        let name = host.rsplit_once(':').map_or(host, |(name, _)| name);
+        let is_ip = name.starts_with('[') || name.parse::<IpAddr>().is_ok();
+        (!name.is_empty() && !is_ip).then_some(name)
+    }
 }
 
 /// An address range in CIDR notation, or a single address.
@@ -217,6 +226,15 @@ mod tests {
             "https://login.example.com"
         );
         assert!(Issuer::parse("http://127.0.0.1:8080").is_ok());
+        // Passkeys need a domain.
+        let domain = |issuer| Issuer::parse(issuer).unwrap().domain().map(str::to_owned);
+        assert_eq!(
+            domain("https://login.example.com:8443"),
+            Some("login.example.com".into())
+        );
+        assert_eq!(domain("http://localhost:8080"), Some("localhost".into()));
+        assert_eq!(domain("http://127.0.0.1:8080"), None);
+        assert_eq!(domain("http://[::1]:8080"), None);
         for bad in [
             "http://login.example.com",
             "https://login.example.com/auth",

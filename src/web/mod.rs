@@ -9,8 +9,10 @@ mod i18n;
 mod layout;
 mod limits;
 mod oidc;
+mod passkeys;
 mod providers;
 mod qr;
+mod replay;
 mod session;
 pub(crate) mod setup;
 mod signin;
@@ -24,8 +26,8 @@ use tokio::sync::Semaphore;
 use self::i18n::Lang;
 use self::layout::error_page;
 use self::limits::Limits;
-use self::oidc::dpop::ProofLog;
 use self::oidc::keys::KeyRing;
+use self::replay::ReplayLog;
 use crate::config::Config;
 use crate::crypto::{CryptoError, MacKey, SealingKey};
 use crate::http::client::Client;
@@ -41,7 +43,9 @@ pub(crate) struct App {
     pub(crate) db: Db,
     pub(crate) keys: Keys,
     limits: Limits,
-    dpop_proofs: ProofLog,
+    dpop_proofs: ReplayLog,
+    /// Answers to passkey challenges, each of which works once.
+    passkey_answers: ReplayLog,
     /// Password hashes computed at once. Each takes tens of megabytes for a moment, so this
     /// bounds the memory a burst of sign-ins can use.
     hashing: Semaphore,
@@ -75,6 +79,9 @@ pub(crate) struct Keys {
     pub(crate) subject: MacKey,
     /// Hashes recovery codes.
     pub(crate) recovery: MacKey,
+    /// Derives the user handles of passkeys, which name an account to authenticators without
+    /// revealing which one.
+    pub(crate) passkeys: MacKey,
 }
 
 impl Keys {
@@ -90,6 +97,7 @@ impl Keys {
             signing: master.sealing_key("signing keys")?,
             subject: master.mac_key("subject")?,
             recovery: master.mac_key("recovery codes")?,
+            passkeys: master.mac_key("passkey user handles")?,
         })
     }
 }
@@ -128,7 +136,8 @@ impl App {
             config,
             db,
             limits: Limits::new(),
-            dpop_proofs: ProofLog::new(),
+            dpop_proofs: ReplayLog::new(),
+            passkey_answers: ReplayLog::new(),
             hashing: Semaphore::new(HASHING_SLOTS),
             branding: RwLock::new(branding),
             signing: RwLock::new(Arc::new(ring)),
@@ -277,6 +286,7 @@ async fn dispatch(app: &App, request: &Request) -> Result<Option<Response>, Fail
         "/login/code" if post => signin::second_step_submit(app, request, false).await?,
         "/login/recovery" if get => signin::second_step_page(app, request, true)?,
         "/login/recovery" if post => signin::second_step_submit(app, request, true).await?,
+        "/login/passkey" if post => signin::passkey_submit(app, request).await?,
         "/logout" if post => session::sign_out(app, request).await?,
         "/setup" if get => return setup::setup_page(app, request).await,
         "/setup" if post => return setup::setup_submit(app, request).await,
@@ -287,6 +297,8 @@ async fn dispatch(app: &App, request: &Request) -> Result<Option<Response>, Fail
         "/account/password" if post => account::password_submit(app, request).await?,
         "/account/two-factor" if get => account::two_factor_page(app, request).await?,
         "/account/two-factor" if post => account::two_factor_submit(app, request).await?,
+        "/account/passkeys" if get => passkeys::page(app, request).await?,
+        "/account/passkeys" if post => passkeys::submit(app, request).await?,
         "/.well-known/openid-configuration" if get => oidc::discovery(app),
         "/jwks" if get => oidc::jwks(app),
         "/authorize" if get => oidc::authorize(app, request, &request.query).await?,

@@ -4,6 +4,7 @@
 //! `fuzz/` can reach the parsers through the `fuzz` module, which exists only when building with
 //! `--cfg fuzzing`. Everything else stays private to the crate.
 
+mod cbor;
 mod config;
 mod crypto;
 mod encoding;

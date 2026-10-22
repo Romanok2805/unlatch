@@ -1,9 +1,9 @@
 //! Administration: applications, users, groups, sessions, sign-in providers, the audit log and
 //! settings.
 //!
-//! Only administrators with two-factor sign-in reach it, and only with a code entered recently:
-//! within 12 hours to look, within 30 minutes to change anything. Everyone else gets a 404, so
-//! the pages don't even confirm they exist.
+//! Only administrators with two-factor sign-in reach it, and only with a code or a passkey
+//! entered recently: within 12 hours to look, within 30 minutes to change anything. Everyone
+//! else gets a 404, so the pages don't even confirm they exist.
 
 mod apps;
 mod groups;
@@ -17,6 +17,7 @@ use hyper::{Method, StatusCode};
 use super::csrf::{self, Csrf};
 use super::i18n::Lang;
 use super::layout::{Frame, Section, admin_page, auth_page, error_notice, success_notice, tooltip};
+use super::passkeys;
 use super::record_audit;
 use super::signin::verify_code;
 use super::{App, Failure, is_local_path, session};
@@ -149,7 +150,7 @@ pub(crate) async fn route(app: &App, request: &Request) -> Result<Option<Respons
     Ok(Some(response))
 }
 
-/// `/admin/verify`: asks for a code before administration, again after a while.
+/// `/admin/verify`: asks for a code or a passkey before administration, again after a while.
 async fn verify(app: &App, request: &Request) -> Result<Response, Failure> {
     let Some(session) = session::current(app, request).await? else {
         return Ok(session::to_sign_in(request));
@@ -171,6 +172,7 @@ async fn verify(app: &App, request: &Request) -> Result<Response, Failure> {
         .filter(|path| is_local_path(path) && path.starts_with("/admin"))
         .unwrap_or("/admin")
         .to_owned();
+    let action = format!("/admin/verify?next={}", encode(&next));
     let mut problem = None;
     if request.method == Method::POST {
         let key = session.user.id.0.to_string();
@@ -181,19 +183,33 @@ async fn verify(app: &App, request: &Request) -> Result<Response, Failure> {
             .flatten()
             .unwrap_or_default();
         let limits = &app.limits;
-        if !csrf::verify(app, request) {
+        let verified = if request.form.single("credential").ok().flatten().is_some() {
+            match passkeys::check_answer(app, request, Some(session.user.id)).await? {
+                Ok(_) => true,
+                Err(refusal) => {
+                    problem = Some(refusal.message(text));
+                    false
+                }
+            }
+        } else if !csrf::verify(app, request) {
             problem = Some(text.form_expired);
+            false
         } else if !limits.code_attempt(&key) {
             problem = Some(text.too_many_attempts);
+            false
         } else if verify_code(app, &session.user, code).await? {
+            limits.code_succeeded(&key);
+            true
+        } else {
+            problem = Some(text.wrong_code);
+            false
+        };
+        if verified {
             let (id, now) = (session.id, time::now());
             app.db
                 .run(move |conn| sessions::mark_verified(conn, id, now))
                 .await?;
-            limits.code_succeeded(&key);
             return Ok(Response::redirect(next));
-        } else {
-            problem = Some(text.wrong_code);
         }
     }
     let csrf = Csrf::for_page(app, request)?;
@@ -211,8 +227,8 @@ async fn verify(app: &App, request: &Request) -> Result<Response, Failure> {
     }
     html!(
         content,
-        "<form class=\"stack\" method=\"post\" action=\"/admin/verify?next=",
-        { encode(&next) },
+        "<form class=\"stack\" method=\"post\" action=\"",
+        { action },
         "\">",
         { csrf.field() },
         "<div><label for=\"code\" class=\"visually-hidden\">",
@@ -221,7 +237,9 @@ async fn verify(app: &App, request: &Request) -> Result<Response, Failure> {
         "autocomplete=\"one-time-code\" maxlength=\"7\" required autofocus data-autosubmit></div>",
         "<button class=\"primary block\">",
         { text.confirm },
-        "</button></form>"
+        "</button></form><div class=\"alternatives\">",
+        { passkeys::verify_form(app, text, &csrf, session.user.id, &action).await? },
+        "</div>"
     );
     let page = auth_page(app, request, lang, text.code_title, &content);
     Ok(csrf.apply(app, Response::html(page)))

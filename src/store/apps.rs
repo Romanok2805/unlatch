@@ -142,6 +142,20 @@ pub(crate) fn allows(conn: &Connection, app: &AppRecord, user: UserId) -> Result
     )?)
 }
 
+/// The applications the user may use, by the rule of [`allows`], ordered by name.
+pub(crate) fn usable_by(conn: &Connection, user: UserId) -> Result<Vec<AppRecord>, DbError> {
+    let mut statement = conn.prepare(&format!(
+        "SELECT {COLUMNS} FROM apps WHERE enabled AND (all_users OR EXISTS (
+            SELECT 1 FROM app_groups JOIN group_members USING (group_id)
+            WHERE app_groups.app_id = apps.id AND group_members.user_id = ?1))
+         ORDER BY name COLLATE NOCASE"
+    ))?;
+    let apps = statement
+        .query_map([user.0], from_row)?
+        .collect::<Result<Vec<_>, _>>()?;
+    apps.into_iter().map(|app| with_uris(conn, app)).collect()
+}
+
 /// The scope the user already consented to for this application, if any.
 pub(crate) fn consent(
     conn: &Connection,
@@ -339,4 +353,42 @@ pub(crate) fn redirect_origins(conn: &Connection) -> Result<Vec<String>, DbError
         })
         .collect();
     Ok(origins)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::Db;
+
+    #[tokio::test]
+    async fn lists_the_apps_a_user_may_use() {
+        let db = Db::open_in_memory().unwrap();
+        let names = db
+            .run(|conn| {
+                conn.execute_batch(
+                    "INSERT INTO users (id, username, display_name, created_at)
+                         VALUES (1, 'ann', 'Ann', 0), (2, 'bob', 'Bob', 0);
+                     INSERT INTO groups (id, name) VALUES (1, 'team');
+                     INSERT INTO group_members (group_id, user_id) VALUES (1, 1);
+                     INSERT INTO apps (id, name, kind, client_id, all_users, enabled, created_at)
+                         VALUES (1, 'Wiki', 'oidc', 'wiki', 1, 1, 0),
+                                (2, 'Code', 'oidc', 'code', 0, 1, 0),
+                                (3, 'Old', 'oidc', 'old', 1, 0, 0);
+                     INSERT INTO app_groups (app_id, group_id) VALUES (2, 1);",
+                )?;
+                let names = |user| -> Result<Vec<String>, DbError> {
+                    Ok(usable_by(conn, UserId(user))?
+                        .into_iter()
+                        .map(|app| app.name)
+                        .collect())
+                };
+                Ok((names(1)?, names(2)?))
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            names,
+            (vec!["Code".into(), "Wiki".into()], vec!["Wiki".into()])
+        );
+    }
 }

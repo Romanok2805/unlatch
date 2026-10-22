@@ -1,4 +1,5 @@
 //! The account page: password, two-factor sign-in, linked sign-in providers and sessions.
+//! Passkeys have a page of their own, in [`super::passkeys`].
 
 use super::csrf::{self, Csrf};
 use super::device::describe_device;
@@ -6,15 +7,16 @@ use super::i18n::{Lang, Text};
 use super::layout::{auth_page, error_notice, icon, success_notice, tooltip};
 use super::record_audit;
 use super::signin::{check_password, hash_password, recovery_code_hash, totp_context, verify_code};
-use super::{App, Failure, qr, session};
+use super::{App, Failure, passkeys, qr, session};
 use crate::crypto::{random_bytes, totp};
 use crate::encoding::{base32, base64url, decode_base64url};
 use crate::html::{Html, html};
 use crate::http::{Request, Response};
+use crate::store::apps::{self, AppRecord, Kind};
 use crate::store::audit::Action;
 use crate::store::sessions::{self, ActiveSession, SessionId, SessionSummary};
 use crate::store::users::UserId;
-use crate::store::{audit, providers, users};
+use crate::store::{audit, passkeys as stored_passkeys, providers, users};
 use crate::time::{self, format_utc};
 
 const MIN_PASSWORD_CHARS: usize = 12;
@@ -113,6 +115,27 @@ pub(super) async fn overview(app: &App, request: &Request) -> Result<Response, F
         },
         "</a></li>"
     );
+    if passkeys::relying_party(app).is_some() {
+        let id = user.id;
+        let count = app
+            .db
+            .run(move |conn| stored_passkeys::count(conn, id))
+            .await?;
+        html!(
+            content,
+            "<li>",
+            { icon("fingerprint") },
+            "<span>",
+            { text.passkeys },
+            "</span><a href=\"/account/passkeys\">"
+        );
+        if count > 0 {
+            html!(content, { count });
+        } else {
+            html!(content, { text.add });
+        }
+        html!(content, "</a></li>");
+    }
     if user.is_admin {
         html!(
             content,
@@ -131,6 +154,7 @@ pub(super) async fn overview(app: &App, request: &Request) -> Result<Response, F
         .run(move |conn| sessions::list(conn, Some(user_id), now))
         .await?;
     html!(content, "</ul>");
+    app_list(app, &mut content, text, user.id).await?;
     provider_list(app, &mut content, text, &csrf, user.id).await?;
     html!(content, "<h2>", { text.section_sessions }, "</h2>");
     session_list(&mut content, text, &csrf, &others, session.id);
@@ -145,6 +169,60 @@ pub(super) async fn overview(app: &App, request: &Request) -> Result<Response, F
     );
     let page = auth_page(app, request, lang, text.account_title, &content);
     Ok(csrf.apply(app, Response::html(page)))
+}
+
+/// The applications the user may use, each with a link to its site.
+async fn app_list(app: &App, out: &mut Html, text: &Text, user: UserId) -> Result<(), Failure> {
+    let records = app.db.run(move |conn| apps::usable_by(conn, user)).await?;
+    let secure = app.config.issuer.is_secure();
+    let links: Vec<_> = records
+        .iter()
+        .filter_map(|record| Some((record, address(record, secure)?)))
+        .collect();
+    if links.is_empty() {
+        return Ok(());
+    }
+    html!(
+        *out,
+        "<h2>",
+        { text.section_apps },
+        "</h2><ul class=\"rows\">"
+    );
+    for (record, address) in &links {
+        html!(
+            *out,
+            "<li>",
+            { icon("layout-grid") },
+            "<span>",
+            { record.name },
+            "</span><a href=\"",
+            { address },
+            "\">",
+            { text.open },
+            "</a></li>"
+        );
+    }
+    html!(*out, "</ul>");
+    Ok(())
+}
+
+/// Where an application lives: the site of its https redirect URI, or its host behind forward
+/// authentication. A native app, with only loopback or custom-scheme redirects, has none.
+fn address(record: &AppRecord, secure: bool) -> Option<String> {
+    match record.kind {
+        Kind::Proxy => {
+            let scheme = if secure { "https" } else { "http" };
+            record
+                .host
+                .as_ref()
+                .map(|host| format!("{scheme}://{host}/"))
+        }
+        Kind::Oidc => record.redirect_uris.iter().find_map(|uri| {
+            let rest = uri.as_str().strip_prefix("https://")?;
+            let authority = rest.split(['/', '?', '#']).next()?;
+            Some(format!("https://{authority}/"))
+        }),
+    }
 }
 
 /// The enabled sign-in providers, each with a button to link or unlink it.
@@ -556,7 +634,8 @@ pub(super) async fn two_factor_submit(app: &App, request: &Request) -> Result<Re
             return enrol_page(app, request, &session, secret.expose(), Some(problem));
         }
         let now = u64::try_from(time::now()).unwrap_or(0);
-        let Some(step) = totp::verify(secret.expose(), code, now, None) else {
+        let Some(step) = totp::verify(secret.expose(), totp::Algorithm::Sha1, code, now, None)
+        else {
             return enrol_page(
                 app,
                 request,

@@ -19,7 +19,7 @@ use crate::secret::Secret;
 /// Tokens larger than this are rejected before any parsing.
 const MAX_TOKEN_LEN: usize = 16 * 1024;
 /// RSA keys shorter than 2048 bits are refused.
-const MIN_RSA_MODULUS_LEN: usize = 256;
+pub(super) const MIN_RSA_MODULUS_LEN: usize = 256;
 
 /// Signature algorithms. `none` and HMAC are absent on purpose: a token must be signed, and
 /// signing with a secret shared with a client would let the client forge tokens.
@@ -335,8 +335,8 @@ impl VerifyingKey {
 
 /// An odd RSA exponent from 65537 to 2³² − 1, written without leading zeros, as NIST SP 800-56B
 /// asks. With a tiny one such as 1, anyone could compute a valid signature, which matters where
-/// the sender picks the key, as in DPoP.
-fn valid_exponent(e: &[u8]) -> bool {
+/// the sender picks the key, as in DPoP and passkeys.
+pub(super) fn valid_exponent(e: &[u8]) -> bool {
     let mut bytes = [0; 4];
     let copied = 4_usize
         .checked_sub(e.len())

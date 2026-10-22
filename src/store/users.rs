@@ -6,6 +6,7 @@ use super::DbError;
 use super::groups::GroupId;
 use crate::crypto::TokenHash;
 use crate::crypto::password::PasswordHash;
+use crate::crypto::totp;
 use crate::identifier::Identifier;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,6 +21,7 @@ pub(crate) struct User {
     pub(crate) password_hash: Option<PasswordHash>,
     /// Sealed; see [`crate::crypto::totp`].
     pub(crate) totp_secret: Option<Vec<u8>>,
+    pub(crate) totp_algorithm: totp::Algorithm,
     pub(crate) totp_last_step: Option<i64>,
     pub(crate) is_admin: bool,
     pub(crate) disabled: bool,
@@ -28,7 +30,7 @@ pub(crate) struct User {
 /// The columns `from_row` reads, first in a query and qualified so they work in joins.
 pub(crate) const COLUMNS: &str = "users.id, users.username, users.display_name, \
     users.email, users.email_verified, users.password_hash, users.totp_secret, \
-    users.totp_last_step, users.is_admin, users.disabled";
+    users.totp_last_step, users.is_admin, users.disabled, users.totp_algorithm";
 
 pub(crate) fn from_row(row: &Row<'_>) -> rusqlite::Result<User> {
     Ok(User {
@@ -41,6 +43,7 @@ pub(crate) fn from_row(row: &Row<'_>) -> rusqlite::Result<User> {
             .get::<_, Option<String>>(5)?
             .map(PasswordHash::from_stored),
         totp_secret: row.get(6)?,
+        totp_algorithm: totp::Algorithm::from_column(&row.get::<_, String>(10)?),
         totp_last_step: row.get(7)?,
         is_admin: row.get(8)?,
         disabled: row.get(9)?,
@@ -107,14 +110,16 @@ pub(crate) fn set_password(
     Ok(())
 }
 
-/// Stores a new TOTP seed, sealed, or removes it with `None`. Recovery codes go with it.
+/// Stores a new TOTP seed, sealed, or removes it with `None`. Recovery codes go with it. Seeds set
+/// up here are SHA-1 ones.
 pub(crate) fn set_totp(
     conn: &Connection,
     id: UserId,
     sealed_secret: Option<&[u8]>,
 ) -> Result<(), DbError> {
     conn.execute(
-        "UPDATE users SET totp_secret = ?2, totp_last_step = NULL WHERE id = ?1",
+        "UPDATE users SET totp_secret = ?2, totp_algorithm = 'SHA1', totp_last_step = NULL \
+        WHERE id = ?1",
         params![id.0, sealed_secret],
     )?;
     if sealed_secret.is_none() {

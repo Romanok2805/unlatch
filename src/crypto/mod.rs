@@ -2,6 +2,7 @@
 
 mod jws;
 mod master_key;
+pub(crate) mod passkey;
 pub(crate) mod password;
 pub(crate) mod totp;
 

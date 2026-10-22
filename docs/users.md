@@ -22,6 +22,7 @@ it for their email domain; see [sign-in providers](providers.md#creating-account
 - *Groups*: the groups the user belongs to.
 - *Password link*: a one-time link, valid for three days, for setting a new password.
 - *Reset two-factor sign-in*: removes the user's authenticator app and recovery codes.
+- *Remove passkeys*: removes all of the user's passkeys.
 - *End all sessions*: signs the user out on every device.
 
 ## When someone can't get in
@@ -30,12 +31,15 @@ it for their email domain; see [sign-in providers](providers.md#creating-account
 |---|---|
 | The password | Give them a password link from their page. |
 | The authenticator app | They can still sign in with a recovery code; each works once. To move to a new app, reset two-factor sign-in on their page, and they set it up again on their account page. |
+| A device with a passkey | They sign in another way and remove that passkey on their account page. If they can't sign in, remove their passkeys on their page. |
 
 ## What users do themselves
 
-On their account page, which they see after signing in, people change their password, turn on
-two-factor sign-in with an authenticator app, get new recovery codes, see their sessions and end
-any of them, and [link accounts](providers.md#linking-accounts) at sign-in providers.
+On their account page, which they see after signing in, people find links to the
+[applications](applications.md#adding-an-application) they may use, change their password, turn on
+two-factor sign-in with an authenticator app, get new recovery codes, add
+[passkeys](architecture.md#signing-in), see their sessions and end any of them, and
+[link accounts](providers.md#linking-accounts) at sign-in providers.
 
 ## Groups
 

@@ -32,6 +32,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "passkey"
+path = "fuzz_targets/passkey.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "base64"
 path = "fuzz_targets/base64.rs"
 test = false

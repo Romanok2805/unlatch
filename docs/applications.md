@@ -14,6 +14,9 @@ they are. For services that don't support it, use [forward authentication](forwa
    what the application sends character for character.
 4. Under *Access*, choose *Everyone* or the [groups](users.md#groups) whose members may use it.
 
+Those people see the application on their account page, with a link to the site of its https
+redirect URI, or to its host with forward authentication.
+
 The application then needs these values; most find everything from the issuer alone.
 
 | Setting | Value |

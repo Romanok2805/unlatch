@@ -36,6 +36,9 @@ arrives over the network is untrusted, including connected applications and outs
 | Guessing passwords, credential stuffing | [Attempt limits, Argon2id, TOTP](architecture.md#signing-in) |
 | Finding out which accounts exist | [Dummy hash for unknown names](architecture.md#signing-in) |
 | Guessing or reusing a TOTP code | [Single-use codes, attempt limits](architecture.md#signing-in) |
+| Phishing for passwords and codes | [Passkeys, which work only on our site](architecture.md#signing-in) |
+| Replaying a passkey answer, a copied security key | [Single-use challenges, signature counter](architecture.md#signing-in) |
+| Adding a passkey in a session left open | [Recent sign-in required](architecture.md#signing-in) |
 | Taking over a fresh installation | [One-time setup token](architecture.md#signing-in) |
 | Taking over an account through an outside provider | [Linking by provider and subject](architecture.md#signing-in) |
 | Stealing or fixing a session | [Cookie flags, new ID at sign-in, expiry](architecture.md#sessions-and-pages) |

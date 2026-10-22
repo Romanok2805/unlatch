@@ -13,6 +13,8 @@ pub(crate) enum Action {
     SetPasswordFromLink,
     TurnOnTwoFactor,
     TurnOffTwoFactor,
+    AddPasskey,
+    RemovePasskey,
     CreateAdministrator,
     CreateApplication,
     ChangeApplication,
@@ -23,6 +25,7 @@ pub(crate) enum Action {
     DeleteUser,
     CreatePasswordLink,
     ResetTwoFactor,
+    RemovePasskeys,
     EndSessions,
     EndSession,
     CreateGroup,
@@ -37,12 +40,14 @@ pub(crate) enum Action {
 }
 
 impl Action {
-    const ALL: [Self; 26] = [
+    const ALL: [Self; 29] = [
         Self::SignIn,
         Self::ChangePassword,
         Self::SetPasswordFromLink,
         Self::TurnOnTwoFactor,
         Self::TurnOffTwoFactor,
+        Self::AddPasskey,
+        Self::RemovePasskey,
         Self::CreateAdministrator,
         Self::CreateApplication,
         Self::ChangeApplication,
@@ -53,6 +58,7 @@ impl Action {
         Self::DeleteUser,
         Self::CreatePasswordLink,
         Self::ResetTwoFactor,
+        Self::RemovePasskeys,
         Self::EndSessions,
         Self::EndSession,
         Self::CreateGroup,
@@ -73,6 +79,8 @@ impl Action {
             Self::SetPasswordFromLink => "set password from link",
             Self::TurnOnTwoFactor => "turn on two-factor sign-in",
             Self::TurnOffTwoFactor => "turn off two-factor sign-in",
+            Self::AddPasskey => "add passkey",
+            Self::RemovePasskey => "remove passkey",
             Self::CreateAdministrator => "create administrator",
             Self::CreateApplication => "create application",
             Self::ChangeApplication => "change application",
@@ -83,6 +91,7 @@ impl Action {
             Self::DeleteUser => "delete user",
             Self::CreatePasswordLink => "create password link",
             Self::ResetTwoFactor => "reset two-factor sign-in",
+            Self::RemovePasskeys => "remove passkeys",
             Self::EndSessions => "end sessions",
             Self::EndSession => "end session",
             Self::CreateGroup => "create group",

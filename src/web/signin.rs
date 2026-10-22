@@ -1,5 +1,5 @@
 //! Signing in: the first factor (a password or an outside provider), the code step and
-//! recovery codes.
+//! recovery codes, or a passkey, which is both factors at once.
 //!
 //! The steps are types. [`FirstFactor`] exists only after a password or provider succeeded, and
 //! [`SignedIn`] only after every factor the account has; both have private fields and are made
@@ -14,6 +14,7 @@ use super::csrf::{self, Csrf};
 use super::i18n::Lang;
 use super::layout::{auth_page, error_notice, icon, reveal_button};
 use super::oidc::client_name_for;
+use super::passkeys::{self, Refusal};
 use super::{App, Failure, is_local_path, session};
 use crate::crypto::password::{self, PasswordHash};
 use crate::crypto::totp;
@@ -56,7 +57,8 @@ impl SignedIn {
     }
 
     /// The `amr` values of this sign-in (RFC 8176): `pwd` or `fed`, then `otp` if a code was
-    /// entered.
+    /// entered. A passkey gives `pop mfa`: possession of a key (`pop`, from OpenID Connect EAP),
+    /// and a second factor, a PIN or biometrics, that the authenticator checked but doesn't name.
     pub(crate) fn amr(&self) -> &'static str {
         self.amr
     }
@@ -131,15 +133,17 @@ pub(super) async fn page(app: &App, request: &Request) -> Result<Response, Failu
         .ok()
         .flatten()
         .unwrap_or_default();
-    login_page(app, request, hint, &next, None).await
+    login_page(app, request, hint, &next, None, None).await
 }
 
+/// The sign-in form. `unknown_passkey` is a passkey the browser offered that isn't stored here.
 async fn login_page(
     app: &App,
     request: &Request,
     username: &str,
     next: &str,
     problem: Option<&str>,
+    unknown_passkey: Option<&[u8]>,
 ) -> Result<Response, Failure> {
     let lang = Lang::of(request);
     let text = lang.text();
@@ -152,6 +156,13 @@ async fn login_page(
     if let Some(problem) = problem {
         html!(content, { error_notice(problem) });
     }
+    // Browsers that support it offer saved passkeys in the username field.
+    let has_passkeys = passkeys::relying_party(app).is_some();
+    let autocomplete = if has_passkeys {
+        "username webauthn"
+    } else {
+        "username"
+    };
     html!(
         content,
         "<form class=\"stack\" method=\"post\" action=\"/login\">",
@@ -162,7 +173,9 @@ async fn login_page(
         { text.username },
         "</label><input id=\"username\" name=\"username\" value=\"",
         { username },
-        "\" autocomplete=\"username\" autocapitalize=\"none\" spellcheck=\"false\" required autofocus>",
+        "\" autocomplete=\"",
+        { autocomplete },
+        "\" autocapitalize=\"none\" spellcheck=\"false\" required autofocus>",
         "</div><div><label for=\"password\">",
         { text.password },
         "</label><div class=\"password\"><input id=\"password\" name=\"password\" type=\"password\" ",
@@ -173,8 +186,10 @@ async fn login_page(
         "</button></form>"
     );
     let providers = super::providers::enabled(app).await?;
-    if !providers.is_empty() {
-        html!(content, "<div class=\"alternatives\">");
+    if has_passkeys || !providers.is_empty() {
+        html!(content, "<div class=\"alternatives\">", {
+            passkeys::sign_in_form(app, text, &csrf, next, unknown_passkey)?
+        });
         for provider in &providers {
             html!(
                 content,
@@ -214,7 +229,15 @@ pub(super) async fn submit(app: &App, request: &Request) -> Result<Response, Fai
         .trim()
         .to_ascii_lowercase();
     if !csrf::verify(app, request) {
-        return login_page(app, request, &username, &next, Some(text.form_expired)).await;
+        return login_page(
+            app,
+            request,
+            &username,
+            &next,
+            Some(text.form_expired),
+            None,
+        )
+        .await;
     }
     let password = request
         .form
@@ -229,7 +252,8 @@ pub(super) async fn submit(app: &App, request: &Request) -> Result<Response, Fai
         ""
     };
     if !app.limits.password_attempt(request.client_ip, account_key) {
-        return login_page(app, request, &username, &next, Some(text.too_many_attempts)).await;
+        let problem = Some(text.too_many_attempts);
+        return login_page(app, request, &username, &next, problem, None).await;
     }
 
     let lookup = username.clone();
@@ -244,7 +268,8 @@ pub(super) async fn submit(app: &App, request: &Request) -> Result<Response, Fai
     let matched = check_password(app, password, hash).await?;
     let Some(user) = user.filter(|_| matched) else {
         info!("wrong password for {username:?} from {}", request.client_ip);
-        return login_page(app, request, &username, &next, Some(text.wrong_credentials)).await;
+        let problem = Some(text.wrong_credentials);
+        return login_page(app, request, &username, &next, problem, None).await;
     };
     app.limits
         .password_succeeded(request.client_ip, account_key);
@@ -275,6 +300,38 @@ pub(super) async fn submit(app: &App, request: &Request) -> Result<Response, Fai
         federated: false,
     };
     set_pending(app, &checked, &next, Response::redirect("/login/code"))
+}
+
+/// `POST /login/passkey`: signs in with a passkey. The authenticator proves that the device is
+/// there and checked the user's PIN or biometrics, so no code is asked for afterwards.
+pub(super) async fn passkey_submit(app: &App, request: &Request) -> Result<Response, Failure> {
+    let text = Lang::of(request).text();
+    let next = next(request);
+    let user_id = match passkeys::check_answer(app, request, None).await? {
+        Ok(user) => user,
+        Err(refusal) => {
+            let unknown = match &refusal {
+                Refusal::Unknown(id) => Some(id.as_slice()),
+                _ => None,
+            };
+            let problem = Some(refusal.message(text));
+            return login_page(app, request, "", &next, problem, unknown).await;
+        }
+    };
+    let Some(user) = app
+        .db
+        .run(move |conn| users::by_id(conn, user_id))
+        .await?
+        .filter(|user| !user.disabled)
+    else {
+        return login_page(app, request, "", &next, Some(text.passkey_failed), None).await;
+    };
+    let signed_in = SignedIn {
+        user: user.id,
+        username: user.username,
+        amr: "pop mfa",
+    };
+    finish(app, request, signed_in, &next).await
 }
 
 /// Continues a sign-in after an outside provider vouched for `user`: with the code step if the
@@ -454,15 +511,19 @@ fn second_step_form(
         { text.confirm },
         "</button></form>"
     );
-    if step == Step::Code {
-        html!(
-            content,
-            "<div class=\"alternatives\"><a href=\"/login/recovery\">",
-            { icon("life-buoy") },
-            { text.use_recovery_code },
-            "</a></div>"
-        );
-    }
+    let (other, other_icon, other_label) = match step {
+        Step::Code => ("/login/recovery", "life-buoy", text.use_recovery_code),
+        Step::Recovery => ("/login/code", "shield-check", text.use_app_code),
+    };
+    html!(
+        content,
+        "<div class=\"alternatives\"><a href=\"",
+        { other },
+        "\">",
+        { icon(other_icon) },
+        { other_label },
+        "</a></div>"
+    );
     let page = auth_page(app, request, lang, title, &content);
     Ok(csrf.apply(app, Response::html(page)))
 }
@@ -544,7 +605,7 @@ pub(super) async fn verify_code(app: &App, user: &User, input: &str) -> Result<b
     let last = user
         .totp_last_step
         .and_then(|step| u64::try_from(step).ok());
-    let Some(step) = totp::verify(secret.expose(), input, now, last) else {
+    let Some(step) = totp::verify(secret.expose(), user.totp_algorithm, input, now, last) else {
         return Ok(false);
     };
     let step = i64::try_from(step).unwrap_or(i64::MAX);

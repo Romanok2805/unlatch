@@ -9,6 +9,10 @@
 
 use std::sync::OnceLock;
 
+use aws_lc_rs::signature::{Ed25519KeyPair, KeyPair as _};
+
+use crate::cbor;
+use crate::crypto::passkey::{self, Assertion, RelyingParty};
 use crate::crypto::{Algorithm, SigningKey, VerifyingKey, verify_jwt, verify_self_signed};
 use crate::encoding::{base64url, decode_base64_standard, decode_base64url};
 use crate::form::{Form, decode_component, encode};
@@ -44,6 +48,30 @@ pub fn jws(data: &[u8]) {
         assert!(verify_jwt(text, std::slice::from_ref(key), None).is_err());
     }
     drop(verify_self_signed(text, "dpop+jwt"));
+}
+
+/// Answers from browsers to passkey challenges, and the CBOR inside them. A fuzzer can't forge a
+/// signature, so no assertion may verify against our key.
+pub fn passkey(data: &[u8]) {
+    const RP: RelyingParty<'static> = RelyingParty {
+        id: "login.example.com",
+        origin: "https://login.example.com",
+    };
+    static KEY: OnceLock<Option<Vec<u8>>> = OnceLock::new();
+    drop(cbor::decode(data));
+    let Ok(text) = str::from_utf8(data) else {
+        return;
+    };
+    drop(passkey::register(&RP, b"challenge", text));
+    // Our key as an Ed25519 COSE_Key: {1: 1, 3: -8, -1: 6, -2: x}.
+    let key = KEY.get_or_init(|| {
+        let pair = Ed25519KeyPair::generate().ok()?;
+        let start = [0xa4, 0x01, 0x01, 0x03, 0x27, 0x20, 0x06, 0x21, 0x58, 0x20];
+        Some([&start[..], pair.public_key().as_ref()].concat())
+    });
+    if let (Some(key), Ok(assertion)) = (key, Assertion::parse(text)) {
+        assert!(assertion.verify(&RP, b"challenge", key, 0).is_err());
+    }
 }
 
 /// Base64 decoding inverts encoding, and is strict: whatever it accepts, it would produce.

@@ -1,5 +1,5 @@
-//! Time-based one-time passwords (RFC 6238) as authenticator apps implement them: HMAC-SHA1, six
-//! digits, 30-second steps. Apps that offer other settings rarely honour them.
+//! Time-based one-time passwords (RFC 6238) as authenticator apps implement them: six digits,
+//! 30-second steps, HMAC-SHA1 or HMAC-SHA256.
 
 use aws_lc_rs::hmac;
 
@@ -11,6 +11,33 @@ use crate::secret::Secret;
 const SECRET_LEN: usize = 20;
 const STEP_SECONDS: u64 = 30;
 
+/// The HMAC behind the codes. New secrets use SHA-1, which every app supports; SHA-256 is for
+/// secrets moved from a provider that set them up with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Algorithm {
+    Sha1,
+    Sha256,
+}
+
+impl Algorithm {
+    /// The algorithm stored in the `totp_algorithm` column, which its CHECK limits to 'SHA1' and
+    /// 'SHA256'.
+    pub(crate) fn from_column(name: &str) -> Self {
+        if name == "SHA256" {
+            Self::Sha256
+        } else {
+            Self::Sha1
+        }
+    }
+
+    fn hmac(self) -> hmac::Algorithm {
+        match self {
+            Self::Sha1 => hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY,
+            Self::Sha256 => hmac::HMAC_SHA256,
+        }
+    }
+}
+
 pub(crate) fn generate_secret() -> Result<Secret<Vec<u8>>, CryptoError> {
     Ok(Secret::new(random_bytes::<SECRET_LEN>()?.to_vec()))
 }
@@ -20,6 +47,7 @@ pub(crate) fn generate_secret() -> Result<Secret<Vec<u8>>, CryptoError> {
 /// code works once even within its window.
 pub(crate) fn verify(
     secret: &[u8],
+    algorithm: Algorithm,
     input: &str,
     now: u64,
     last_used_step: Option<u64>,
@@ -39,7 +67,7 @@ pub(crate) fn verify(
     .into_iter()
     .flatten()
     {
-        let expected = format!("{:06}", code(secret, step));
+        let expected = format!("{:06}", code(secret, algorithm, step));
         let fresh = last_used_step.is_none_or(|last| step > last);
         if constant_time_eq(expected.as_bytes(), digits.as_bytes()) && fresh {
             accepted = Some(step);
@@ -60,8 +88,8 @@ pub(crate) fn uri(secret: &[u8], issuer: &str, account: &str) -> String {
 }
 
 /// The six-digit code for a time step (RFC 4226, section 5.3).
-fn code(secret: &[u8], step: u64) -> u32 {
-    let key = hmac::Key::new(hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY, secret);
+fn code(secret: &[u8], algorithm: Algorithm, step: u64) -> u32 {
+    let key = hmac::Key::new(algorithm.hmac(), secret);
     let tag = hmac::sign(&key, &step.to_be_bytes());
     let tag = tag.as_ref();
     let offset = usize::from(tag.last().copied().unwrap_or(0) & 0xf);
@@ -81,25 +109,30 @@ mod tests {
     #[test]
     fn matches_rfc_6238_test_vectors() {
         // The RFC lists eight digits; authenticator apps show the last six.
-        for (time, expected) in [
-            (59, 287_082),
-            (1_111_111_109, 81_804),
-            (1_234_567_890, 5_924),
+        // SHA-256 uses a 32-byte secret in the RFC.
+        let sha256_secret = b"12345678901234567890123456789012";
+        for (time, sha1, sha256) in [
+            (59, 287_082, 119_246),
+            (1_111_111_109, 81_804, 84_774),
+            (1_234_567_890, 5_924, 819_424),
         ] {
-            assert_eq!(code(RFC_SECRET, time / STEP_SECONDS), expected);
+            let step = time / STEP_SECONDS;
+            assert_eq!(code(RFC_SECRET, Algorithm::Sha1, step), sha1);
+            assert_eq!(code(sha256_secret, Algorithm::Sha256, step), sha256);
         }
     }
 
     #[test]
     fn accepts_neighbouring_steps_once() {
+        let sha1 = Algorithm::Sha1;
         let now = 1_234_567_890;
         let step = now / STEP_SECONDS;
-        let next = format!("{:06}", code(RFC_SECRET, step + 1));
+        let next = format!("{:06}", code(RFC_SECRET, sha1, step + 1));
 
-        assert_eq!(verify(RFC_SECRET, "005 924", now, None), Some(step));
-        assert_eq!(verify(RFC_SECRET, &next, now, None), Some(step + 1));
-        assert_eq!(verify(RFC_SECRET, "005924", now, Some(step)), None);
-        assert_eq!(verify(RFC_SECRET, "005925", now, None), None);
-        assert_eq!(verify(RFC_SECRET, "5924", now, None), None);
+        assert_eq!(verify(RFC_SECRET, sha1, "005 924", now, None), Some(step));
+        assert_eq!(verify(RFC_SECRET, sha1, &next, now, None), Some(step + 1));
+        assert_eq!(verify(RFC_SECRET, sha1, "005924", now, Some(step)), None);
+        assert_eq!(verify(RFC_SECRET, sha1, "005925", now, None), None);
+        assert_eq!(verify(RFC_SECRET, sha1, "5924", now, None), None);
     }
 }

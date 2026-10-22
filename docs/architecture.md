@@ -111,10 +111,22 @@ and must not be a common password or the user name; as NIST SP 800-63B-4 advises
 about character classes. Password attempts are limited to 10 per account and 50 per address in a
 quarter hour.
 
-The second factor is a TOTP code from an authenticator app: RFC 6238 with SHA-1, six digits and
-30-second steps, because that is what the apps support. Codes from the previous and next step are
+The second factor is a TOTP code from an authenticator app: RFC 6238 with six digits and 30-second
+steps. Unlatch sets up SHA-1, because every app supports it, and also checks SHA-256 codes for
+secrets moved from another provider. Codes from the previous and next step are
 accepted to allow for clock drift. Each code works once, and attempts are limited per quarter hour
 and per day. Users also get recovery codes.
+
+People can also sign in with a passkey, which replaces both the password and the code. The device
+that holds it proves it has the key, and must check the person's PIN or biometrics first, so a
+passkey alone is two factors; ID tokens then carry the `amr` values `pop` and `mfa`. Browsers offer
+saved passkeys in the username field. A passkey works only on the site it was made for, so a
+look-alike page can't use it, and it needs the issuer to be a host name rather than an IP address.
+Unlatch asks for no attestation, so any authenticator works and its make isn't checked; keys may be
+EdDSA, ES256 or RS256. Each challenge is sealed rather than stored, lasts five minutes and is
+accepted once, and a passkey whose signature counter goes back is refused as copied. Because a
+passkey is enough to sign in, adding or removing one needs a sign-in within the last ten minutes,
+so whoever finds a session left open can't add their own.
 
 People can sign in with any OpenID Connect provider, such as Google, and with GitHub through its
 own OAuth API. An outside account is linked to a local one by provider and subject only, and only
@@ -147,9 +159,9 @@ come from our own origin and only make things more convenient. Every response ha
 Policy that allows scripts and styles only from our origin, requires Trusted Types and forbids
 framing, and also sets HSTS, `Referrer-Policy: no-referrer` and `X-Content-Type-Options: nosniff`.
 
-Administration needs TOTP and a code entered within the last 12 hours to look and the last 30
-minutes to change anything. To everyone else its pages don't exist. Every change is recorded in the
-audit log.
+Administration needs TOTP, and a code or a passkey entered within the last 12 hours to look and the
+last 30 minutes to change anything. To everyone else its pages don't exist. Every change is
+recorded in the audit log.
 
 Unlatch sends requests only to the sign-in providers and back-channel logout URIs an administrator
 configured, and to the endpoints a provider's discovery document names.
@@ -185,7 +197,7 @@ all: each is sealed and names its grant and a generation number, and the databas
 current generation. An older generation means the token was copied, so the grant is revoked. TOTP
 secrets, the client secrets of sign-in providers and the private signing keys are encrypted with
 AES-256-GCM. The key for that is read from a file, never from the database, so a stolen database
-file is not enough to use them.
+file is not enough to use them. Of passkeys only the public keys are stored, which sign no one in.
 
 Migrations only go forward and make a backup before they run. Audit log entries are deleted after
 180 days, because they contain IP addresses.
@@ -230,5 +242,5 @@ Configuration comes from environment variables, so no configuration file format 
 see [configuration.md](configuration.md).
 
 We write the small parts ourselves when that is easier to review than a dependency: JWS for
-the algorithms we accept, base64 and base32, form decoding, TOTP, migrations, logging and
-HTML templates.
+the algorithms we accept, base64 and base32, form decoding, TOTP, the parts of CBOR and WebAuthn
+that passkeys need, migrations, logging and HTML templates.

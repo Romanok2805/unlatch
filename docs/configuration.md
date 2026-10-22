@@ -4,7 +4,7 @@ Unlatch reads its configuration from environment variables when it starts.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `UNLATCH_ISSUER` | required | The address people open, such as `https://login.example.com`. Every URL Unlatch sends is built from it. Plain `http` is accepted only on localhost, for trying Unlatch out. |
+| `UNLATCH_ISSUER` | required | The address people open, such as `https://login.example.com`. Every URL Unlatch sends is built from it. Plain `http` is accepted only on localhost, for trying Unlatch out. Passkeys need a host name, so they are off when this is an IP address. |
 | `UNLATCH_KEY_FILE` | required | A file with the master key, which encrypts the secrets in the database; see [the master key](running.md#the-master-key). |
 | `UNLATCH_LISTEN` | `127.0.0.1:8080` | The address and port to listen on. |
 | `UNLATCH_DATABASE` | `unlatch.db` | The SQLite file. It is created if it doesn't exist. |

@@ -51,3 +51,120 @@ for (const input of document.querySelectorAll("input[data-autosubmit]")) {
 for (const form of document.querySelectorAll("form[data-autosubmit-form]")) {
   form.submit();
 }
+
+// Passkeys. A form with data-passkey carries the server's options for the browser as JSON, with
+// binary values in base64url, and a hidden button. Where the browser supports passkeys, the
+// button shows; pressing it asks the browser for a passkey and posts the answer in the form. On
+// the sign-in page the browser also offers saved passkeys in the username field.
+const fromBase64url = (text) =>
+  Uint8Array.from(atob(text.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+const toBase64url = (buffer) =>
+  btoa(String.fromCharCode(...new Uint8Array(buffer)))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+const withBinaryId = (descriptor) => ({ ...descriptor, id: fromBase64url(descriptor.id) });
+
+// The answer in the shape WebAuthn's toJSON() gives, which not every browser has.
+const passkeyAnswer = (credential) => {
+  const response = credential.response;
+  const fields = { clientDataJSON: toBase64url(response.clientDataJSON) };
+  if (response.attestationObject) {
+    fields.attestationObject = toBase64url(response.attestationObject);
+    fields.transports = response.getTransports?.() ?? [];
+  } else {
+    fields.authenticatorData = toBase64url(response.authenticatorData);
+    fields.signature = toBase64url(response.signature);
+    fields.userHandle = response.userHandle && toBase64url(response.userHandle);
+  }
+  return JSON.stringify({ id: credential.id, type: credential.type, response: fields });
+};
+
+for (const form of document.querySelectorAll("form[data-passkey]")) {
+  if (!window.PublicKeyCredential) {
+    continue;
+  }
+  const options = JSON.parse(form.dataset.passkey);
+  const creating = "user" in options;
+  const publicKey = { ...options, challenge: fromBase64url(options.challenge) };
+  if (creating) {
+    publicKey.user = { ...options.user, id: fromBase64url(options.user.id) };
+    publicKey.excludeCredentials = options.excludeCredentials.map(withBinaryId);
+  } else {
+    publicKey.allowCredentials = options.allowCredentials.map(withBinaryId);
+  }
+  const post = (credential) => {
+    form.elements.credential.value = passkeyAnswer(credential);
+    form.submit();
+  };
+
+  let autofill = null;
+  const offerInUsernameField = async () => {
+    if (!(await PublicKeyCredential.isConditionalMediationAvailable?.())) {
+      return;
+    }
+    autofill = new AbortController();
+    try {
+      post(
+        await navigator.credentials.get({
+          publicKey,
+          mediation: "conditional",
+          signal: autofill.signal,
+        }),
+      );
+    } catch {
+      // Stopped for the button.
+    }
+  };
+  const signingIn = !creating && options.allowCredentials.length === 0;
+  if (signingIn && document.querySelector('input[autocomplete~="webauthn"]')) {
+    offerInUsernameField();
+  }
+
+  const button = form.querySelector("button");
+  button.hidden = false;
+  form.querySelector("[data-passkey-unsupported]")?.setAttribute("hidden", "");
+  button.addEventListener("click", async () => {
+    if (!form.reportValidity()) {
+      return;
+    }
+    autofill?.abort();
+    try {
+      const ask = creating ? navigator.credentials.create : navigator.credentials.get;
+      post(await ask.call(navigator.credentials, { publicKey }));
+    } catch {
+      // Cancelled, or an authenticator that is already added; the browser has said so.
+      if (autofill) {
+        offerInUsernameField();
+      }
+    }
+  });
+
+  // Password managers that support these signals forget passkeys removed here and keep the
+  // names they show up to date.
+  const quietly = (promise) => promise?.catch(() => {});
+  if (form.dataset.passkeyUnknown) {
+    quietly(
+      PublicKeyCredential.signalUnknownCredential?.({
+        rpId: options.rpId,
+        credentialId: form.dataset.passkeyUnknown,
+      }),
+    );
+  }
+  if (creating) {
+    const account = { rpId: options.rp.id, userId: options.user.id };
+    quietly(
+      PublicKeyCredential.signalAllAcceptedCredentials?.({
+        ...account,
+        allAcceptedCredentialIds: options.excludeCredentials.map((passkey) => passkey.id),
+      }),
+    );
+    quietly(
+      PublicKeyCredential.signalCurrentUserDetails?.({
+        ...account,
+        name: options.user.name,
+        displayName: options.user.displayName,
+      }),
+    );
+  }
+}

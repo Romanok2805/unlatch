@@ -8,6 +8,7 @@ pub(crate) mod apps;
 pub(crate) mod audit;
 pub(crate) mod grants;
 pub(crate) mod groups;
+pub(crate) mod passkeys;
 pub(crate) mod providers;
 pub(crate) mod proxy;
 pub(crate) mod sessions;
@@ -26,7 +27,11 @@ use tokio::sync::{mpsc, oneshot};
 const QUEUE_LEN: usize = 256;
 
 /// Each entry upgrades the schema by one version. Entries are never edited after a release.
-const MIGRATIONS: [&str; 1] = [include_str!("schema.sql")];
+const MIGRATIONS: [&str; 3] = [
+    include_str!("schema.sql"),
+    include_str!("v2.sql"),
+    include_str!("v3.sql"),
+];
 
 type Job = Box<dyn FnOnce(&mut Connection) + Send>;
 

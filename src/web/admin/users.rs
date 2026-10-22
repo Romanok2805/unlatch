@@ -9,6 +9,7 @@ use crate::http::{Request, Response};
 use crate::identifier::Identifier;
 use crate::store::audit::Action;
 use crate::store::groups::{self, Group, GroupId};
+use crate::store::passkeys;
 use crate::store::users::{self, NewUser, User, UserChanges, UserId};
 use crate::time;
 use crate::web::i18n::Text;
@@ -317,10 +318,11 @@ pub(super) async fn edit(
             let Some(user) = users::by_id(conn, id)? else {
                 return Ok(None);
             };
-            Ok(Some((user, users::groups(conn, id)?, groups::list(conn)?)))
+            let found = (user, users::groups(conn, id)?, groups::list(conn)?);
+            Ok(Some((found, passkeys::count(conn, id)?)))
         })
         .await?;
-    let Some((user, user_groups, all_groups)) = found else {
+    let Some(((user, user_groups, all_groups), passkey_count)) = found else {
         return Ok(None);
     };
     let view = |draft: &Draft, problem: Option<&str>| {
@@ -331,6 +333,7 @@ pub(super) async fn edit(
             &user,
             draft,
             &all_groups,
+            passkey_count,
             problem,
         ))
     };
@@ -365,7 +368,9 @@ pub(super) async fn edit(
                 .await?;
             Ok(Some(Response::redirect("/admin/users?notice=deleted")))
         }
-        "link" | "reset_two_factor" | "sign_out" => act(app, request, admin, &user).await.map(Some),
+        "link" | "reset_two_factor" | "remove_passkeys" | "sign_out" => {
+            act(app, request, admin, &user).await.map(Some)
+        }
         _ => {
             let draft = Draft::submitted(request, &user, editing_self);
             let changes = match draft.check(text) {
@@ -394,8 +399,8 @@ pub(super) async fn edit(
     }
 }
 
-/// The buttons in the sign-in section: a password link, resetting two-factor sign-in and
-/// ending every session.
+/// The buttons in the sign-in section: a password link, resetting two-factor sign-in, removing
+/// passkeys and ending every session.
 async fn act(
     app: &App,
     request: &Request,
@@ -436,6 +441,18 @@ async fn act(
                 id.0
             )))
         }
+        "remove_passkeys" => {
+            app.db
+                .run(move |conn| passkeys::delete_all(conn, id))
+                .await?;
+            admin
+                .record(app, request, Action::RemovePasskeys, &user.username)
+                .await?;
+            Ok(Response::redirect(format!(
+                "/admin/users/{}?notice=saved",
+                id.0
+            )))
+        }
         _ => {
             session::end(app, Ending::AllOf(id, None)).await?;
             admin
@@ -463,6 +480,10 @@ fn parse_email(text: &str) -> Result<Option<String>, ()> {
     valid.then(|| Some(text.to_owned())).ok_or(())
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each is a separate part of the page"
+)]
 fn edit_form(
     app: &App,
     request: &Request,
@@ -470,6 +491,7 @@ fn edit_form(
     user: &User,
     draft: &Draft,
     all_groups: &[Group],
+    passkey_count: i64,
     problem: Option<&str>,
 ) -> Response {
     let text = admin.lang.text();
@@ -560,7 +582,7 @@ fn edit_form(
         { text.save },
         "</button></div></section></form>"
     );
-    sign_in_section(&mut content, admin, user, &action);
+    sign_in_section(&mut content, admin, user, passkey_count, &action);
     if !editing_self {
         html!(
             content,
@@ -572,8 +594,9 @@ fn edit_form(
     admin.page(app, Section::Users, &user.username, &content)
 }
 
-/// Buttons for the account's sign-in: a password link, two-factor reset and ending sessions.
-fn sign_in_section(out: &mut Html, admin: &Admin, user: &User, action: &str) {
+/// Buttons for the account's sign-in: a password link, two-factor reset, removing passkeys and
+/// ending sessions.
+fn sign_in_section(out: &mut Html, admin: &Admin, user: &User, passkey_count: i64, action: &str) {
     let text = admin.lang.text();
     html!(
         *out,
@@ -613,6 +636,14 @@ fn sign_in_section(out: &mut Html, admin: &Admin, user: &User, action: &str) {
             "shield-check",
             text.reset_two_factor,
             text.tip_reset_two_factor,
+        );
+    }
+    if passkey_count > 0 {
+        button(
+            "remove_passkeys",
+            "fingerprint",
+            text.remove_passkeys,
+            text.tip_remove_passkeys,
         );
     }
     button(
