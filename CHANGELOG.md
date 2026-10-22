@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- The copy of the database that Unlatch saves before a migration is readable only by its owner,
+  like the database itself.
+
 ## 0.2.0
 
 - Buttons for GitHub sign-in show the GitHub mark, as Google's show Google's.

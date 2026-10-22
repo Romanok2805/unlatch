@@ -103,7 +103,7 @@ login.example.com {
 Back up the database and the master key, separately. The database can be copied while Unlatch runs:
 
 ```sh
-sqlite3 /var/lib/unlatch/unlatch.db "VACUUM INTO '/var/backups/unlatch.db'"
+(umask 077; sqlite3 /var/lib/unlatch/unlatch.db "VACUUM INTO '/var/backups/unlatch.db'")
 ```
 
 Before an upgrade changes the database, Unlatch saves a copy next to it, such as

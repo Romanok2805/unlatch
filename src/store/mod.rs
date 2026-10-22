@@ -186,7 +186,11 @@ fn migrate(conn: &mut Connection, path: Option<&Path>) -> Result<(), DbError> {
         return Err(DbError::TooNew { version });
     }
     if let Some(path) = path.filter(|_| applied > 0 && applied < MIGRATIONS.len()) {
-        conn.execute("VACUUM INTO ?1", [backup_path(path, version)?])?;
+        // The copy holds the same secrets, so it is created private first; VACUUM INTO fills an
+        // empty file, where it would otherwise create one anyone may read.
+        let backup = backup_path(path, version)?;
+        create_private_file(Path::new(&backup))?;
+        conn.execute("VACUUM INTO ?1", [backup])?;
     }
     for (index, sql) in MIGRATIONS.iter().enumerate().skip(applied) {
         let tx = conn.transaction()?;
@@ -237,5 +241,29 @@ mod tests {
             })
             .await;
         assert!(bad.unwrap_err().is_constraint_violation());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_copy_before_a_migration_is_private() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let dir = std::env::temp_dir().join(format!("unlatch-migrate-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("unlatch.db");
+        let mut conn = Connection::open(&path).unwrap();
+        conn.execute_batch(MIGRATIONS[0]).unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+        migrate(&mut conn, Some(&path)).unwrap();
+
+        let backups: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|file| file.extension().is_some_and(|extension| extension == "bak"))
+            .collect();
+        let mode = std::fs::metadata(&backups[0]).unwrap().permissions().mode();
+        drop(conn);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!((backups.len(), mode & 0o777), (1, 0o600));
     }
 }
