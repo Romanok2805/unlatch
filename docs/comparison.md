@@ -1,6 +1,6 @@
 # Comparison
 
-How Unlatch 0.2 differs from other single sign-on servers you can host yourself. What this page
+How Unlatch 0.3 differs from other single sign-on servers you can host yourself. What this page
 says about the others comes from their own documentation and code as of 23 October 2026; the
 versions and sources are [at the end](#sources). If something is wrong or out of date, please open
 an issue.
@@ -10,7 +10,7 @@ an issue.
 | **Running it** | | | | | | |
 | Written in | Rust | Go | Go | Rust | Rust | Python, Rust, Go |
 | Parts | One binary, SQLite | One binary, SQLite or PostgreSQL | One binary, SQLite, PostgreSQL or MySQL | One server with its own database | One binary, its own database or PostgreSQL | Server, worker, PostgreSQL |
-| Memory | About 6 MB | Not published | Not published | 64 KB per entry | 40–57 MB | Hosts from 2 GB |
+| Memory | 6.5–7.3 MiB | 64–69 MiB | 106–125 MiB | 64 KB per entry | 40–57 MB | Hosts from 2 GB |
 | Administration | Browser | Browser | Configuration files | Mostly command line | Browser | Browser |
 | Users kept in | Its database | Its database, or synced from LDAP | A file or LDAP | Its database | Its database | Its database, LDAP and others |
 | Needs email | No | No | Yes | No | For some tasks | No |
@@ -35,13 +35,20 @@ an issue.
 
 *Sign-out* is RP-initiated and back-channel logout; *Both* means an application can end the
 session at the server and hear when it ends there. *Device sign-in* is the device authorization
-grant, for TVs and command line tools. Unlatch's memory is
-[measured](architecture.md#memory); the others' figures are what their documentation states.
+grant, for TVs and command line tools.
+
+The memory of Unlatch 0.2.0, Pocket ID 2.19.1 and Authelia 4.39.28 was measured on one machine,
+from their Linux release binaries with default settings, Authelia with OpenID Connect and one
+client: resident memory 30 seconds after start, then its peak while 20 clients fetched the sign-in
+page 6,000 times. Each figure is the median of three runs. Pocket ID and Authelia answer with a page
+that a script finishes in the browser, Unlatch with the finished form. Authelia drops to about 87
+MiB after five minutes at rest. The other three figures are what their documentation states.
 
 ## Where Unlatch stands out
 
-- **Small.** One binary and one SQLite file, about 6 MB of memory at rest. Rauthy states 40 to 57
-  MB, authentik asks for a host with 2 GB.
+- **Small.** One 9 MB binary and one SQLite file, 6.5 MiB of memory at rest. In the same test
+  Pocket ID held 64 MiB and Authelia 106 MiB; Rauthy states 40 to 57 MB, and authentik asks for a
+  host with 2 GB.
 - **Everything in the browser, nothing by email.** Applications, users, groups, sessions and
   sign-in providers are managed in the web interface. Invitations and lost passwords are links an
   administrator hands over, so there is no mail server to set up.

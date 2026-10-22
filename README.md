@@ -9,7 +9,7 @@
 Unlatch is a single sign-on server you host yourself. It speaks OpenID Connect, so people sign in
 once and can then use every service you connect to it, such as Grafana, Forgejo or Nextcloud. It is
 written in Rust with few dependencies and runs as one 9 MB binary with one SQLite file, in
-[about 6 MB of memory](docs/architecture.md#memory).
+[about 7 MB of memory](docs/architecture.md#memory).
 
 Unlatch is young: it hasn't been audited or certified yet. [The comparison](docs/comparison.md)
 shows how it differs from Authelia, authentik, Kanidm, Pocket ID and Rauthy.

@@ -220,10 +220,11 @@ Request and header sizes, the number of connections and every timeout are limite
 
 ## Memory
 
-Measured with the x86-64 Linux release: the binary is 8.8 MB, and the server holds about 6 MB of
-memory at rest. With 20 clients asking for the sign-in page at once, it stays under 8 MB. Password
-checks add up to 38 MiB for a moment, two hashes of 19 MiB each, and it drops back when they
-finish.
+Measured with the x86-64 Linux release: the binary is 8.8 MB, and the server holds 6.5 MiB of
+memory at rest, about 1 MiB of it its own data and the rest its loaded code. With 20 clients asking
+for the sign-in page at once, it peaks at 7.3 MiB. Password checks add up to 38 MiB for a moment,
+two hashes of 19 MiB each, and it drops back when they finish. [The comparison](comparison.md)
+measures Pocket ID and Authelia the same way.
 
 The async runtime uses two worker threads. Static files are built into the binary and cached by
 browsers under addresses that include a hash of their contents.
