@@ -35,13 +35,18 @@ To try it on this machine:
 UNLATCH_ISSUER=http://localhost:8080 UNLATCH_KEY_FILE=key unlatch
 ```
 
-Then open the link from the log, which creates the first administrator. The administrator then adds
-applications in the web interface, where each shows the values to copy into it.
+Then open the link from the log, which creates the first administrator.
+The administrator then [connects applications](docs/applications.md)
+and [invites people](docs/users.md) in the web interface.
 
 ## Documentation
 
 - [Running Unlatch](docs/running.md): releases, systemd, containers, reverse proxy and backups.
 - [Configuration](docs/configuration.md): every setting.
+- [Connecting applications](docs/applications.md): OpenID Connect settings, what applications
+  learn about users, and an example.
+- [Users and groups](docs/users.md): invitations, lost passwords and access by group.
+- [Sign-in providers](docs/providers.md): signing in with Google, GitHub and others.
 - [Forward authentication](docs/forward-auth.md): protecting services without OpenID Connect.
 - [Changes](CHANGELOG.md)
 
