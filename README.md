@@ -16,7 +16,9 @@ Unlatch is young: it hasn't been audited or certified yet.
 
 ## Getting started
 
-Download a release, or build it with `cargo build --release`. To try it on this machine:
+Download [a release](https://github.com/Romanok2805/unlatch/releases),
+install it with `cargo install --locked unlatch`, or build it with `cargo build --release`.
+To try it on this machine:
 
 ```sh
 (umask 077; unlatch generate-key > key)

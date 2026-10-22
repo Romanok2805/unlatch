@@ -1,8 +1,13 @@
 # Running Unlatch
 
-Each release on GitHub has static Linux binaries for x86-64 and ARM64 and a container image in
-the GitHub container registry. The release lists their SHA-256 sums, and `gh attestation verify`
-confirms that a file or image was built from this repository by its release workflow.
+Each [release](https://github.com/Romanok2805/unlatch/releases) has static Linux binaries
+for x86-64 and ARM64 and [a container image](#in-a-container). The release lists their SHA-256
+sums, and `gh attestation verify` confirms that a file or image was built by the release workflow:
+
+```sh
+gh attestation verify unlatch-v0.1.0-x86_64-linux.tar.gz --repo Romanok2805/unlatch
+gh attestation verify oci://ghcr.io/romanok2805/unlatch:v0.1.0 --repo Romanok2805/unlatch
+```
 
 ## The master key
 
@@ -63,9 +68,9 @@ systemd reads the key, which can stay readable by root only, and hands it to the
 ## In a container
 
 The image holds nothing but the binary and runs as user 65532. It listens on port 8080 and keeps
-its database in the volume `/data`. Releases publish it in this repository's packages on GitHub;
-`docker build -t unlatch .` builds the same from source. Give it the key as a read-only file that
-user can read:
+its database in the volume `/data`. Releases publish it as `ghcr.io/romanok2805/unlatch`, tagged
+with the version and `latest`; `docker build -t unlatch .` builds the same from source. Give it the
+key as a read-only file that user can read:
 
 ```sh
 chown 65532 /etc/unlatch/key
@@ -75,7 +80,7 @@ docker run -d --name unlatch -p 127.0.0.1:8080:8080 \
   -e UNLATCH_KEY_FILE=/run/secrets/unlatch-key \
   -v /etc/unlatch/key:/run/secrets/unlatch-key:ro \
   -v unlatch:/data \
-  unlatch
+  ghcr.io/romanok2805/unlatch
 ```
 
 `UNLATCH_TRUSTED_PROXIES` names the network the reverse proxy connects from; the example covers
