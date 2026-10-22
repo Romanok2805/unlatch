@@ -76,9 +76,22 @@ pub(crate) struct Db {
     jobs: mpsc::Sender<Job>,
 }
 
+/// The thread that owns the connection. It closes the connection once every [`Db`] is dropped,
+/// and closing moves the write-ahead log into the database file and deletes it.
+pub(crate) struct DbThread(thread::JoinHandle<()>);
+
+impl DbThread {
+    /// Waits until the connection is closed, so the database file is complete on its own. Every
+    /// [`Db`] must be dropped first.
+    pub(crate) fn join(self) {
+        // The thread only runs queries, which return their errors instead of panicking.
+        drop(self.0.join());
+    }
+}
+
 impl Db {
     /// Opens or creates the database and upgrades its schema, backing it up first.
-    pub(crate) fn open(path: &Path) -> Result<Self, DbError> {
+    pub(crate) fn open(path: &Path) -> Result<(Self, DbThread), DbError> {
         create_private_file(path)?;
         let mut conn = Connection::open(path)?;
         configure(&conn)?;
@@ -91,12 +104,12 @@ impl Db {
         let mut conn = Connection::open_in_memory()?;
         configure(&conn)?;
         migrate(&mut conn, None)?;
-        Self::start(conn)
+        Self::start(conn).map(|(db, _thread)| db)
     }
 
-    fn start(mut conn: Connection) -> Result<Self, DbError> {
+    fn start(mut conn: Connection) -> Result<(Self, DbThread), DbError> {
         let (jobs, mut queue) = mpsc::channel::<Job>(QUEUE_LEN);
-        thread::Builder::new()
+        let thread = thread::Builder::new()
             .name("database".to_owned())
             .spawn(move || {
                 while let Some(job) = queue.blocking_recv() {
@@ -104,7 +117,7 @@ impl Db {
                 }
             })
             .map_err(DbError::Io)?;
-        Ok(Self { jobs })
+        Ok((Self { jobs }, DbThread(thread)))
     }
 
     /// Runs `query` on the database thread.
@@ -266,5 +279,19 @@ mod tests {
         drop(conn);
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!((backups.len(), mode & 0o777), (1, 0o600));
+    }
+
+    #[test]
+    fn closing_moves_the_log_into_the_database() {
+        let dir = std::env::temp_dir().join(format!("unlatch-close-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (db, thread) = Db::open(&dir.join("unlatch.db")).unwrap();
+        let log = dir.join("unlatch.db-wal");
+        let written = log.exists();
+        drop(db);
+        thread.join();
+        let left = log.exists();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!((written, left), (true, false));
     }
 }

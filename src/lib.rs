@@ -87,14 +87,30 @@ fn serve() -> ExitCode {
     log::set_level(config.log_level);
     // Two workers are plenty for sign-ins and keep memory low; password hashing runs on the
     // blocking pool and the database on its own thread.
-    let runtime = tokio::runtime::Builder::new_multi_thread()
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
-        .build();
-    let result = match runtime {
-        Ok(runtime) => runtime.block_on(run(config)),
-        Err(e) => Err(format!("can't start the async runtime: {e}")),
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(e) => {
+            error!("can't start the async runtime: {e}");
+            return ExitCode::FAILURE;
+        }
     };
+    let (db, db_thread) = match Db::open(&config.database) {
+        Ok(opened) => opened,
+        Err(e) => {
+            error!("{e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let result = runtime.block_on(run(config, db));
+    // Dropping the runtime drops every task and with them every handle to the database, so the
+    // database thread closes the connection. Exiting before it has would leave the write-ahead
+    // log next to the database file, and a copy of that file alone would miss the latest changes.
+    drop(runtime);
+    db_thread.join();
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
@@ -104,8 +120,7 @@ fn serve() -> ExitCode {
     }
 }
 
-async fn run(config: Config) -> Result<(), String> {
-    let db = Db::open(&config.database).map_err(|e| e.to_string())?;
+async fn run(config: Config, db: Db) -> Result<(), String> {
     let listener = http::bind(config.listen).await.map_err(|e| e.to_string())?;
     let tls = config.tls.clone().map(http::tls::acceptor).transpose()?;
     let app = Arc::new(App::new(config, db).await.map_err(|e| e.to_string())?);

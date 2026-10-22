@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- When it stops, Unlatch closes the database before exiting, so the database file is complete on
+  its own and no write-ahead log is left next to it.
+
 ## 0.3.0 - 2026-10-23
 
 - A sign-in provider can skip the two-factor code, for providers whose accounts have two-factor
