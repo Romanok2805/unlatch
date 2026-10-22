@@ -33,10 +33,13 @@ applications in the web interface, where each shows the values to copy into it.
 - [Running Unlatch](docs/running.md): releases, systemd, containers, reverse proxy and backups.
 - [Configuration](docs/configuration.md): every setting.
 - [Forward authentication](docs/forward-auth.md): protecting services without OpenID Connect.
+- [Changes](CHANGELOG.md)
+
+## Development
+
 - [Architecture](docs/architecture.md): how Unlatch works, why, and what is left out on purpose.
 - [Threat model](docs/threat-model.md): what it protects against and what it doesn't.
 - [Conformance](conformance/README.md): results of the OpenID Foundation's test suite.
-- [Changes](CHANGELOG.md)
 - [Contributing](CONTRIBUTING.md)
 - [Reporting a vulnerability](SECURITY.md)
 

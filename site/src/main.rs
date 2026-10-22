@@ -14,14 +14,12 @@ use pulldown_cmark::{CowStr, Event, HeadingLevel, Options, Parser, Tag, html};
 const REPOSITORY: &str = "https://github.com/Romanok2805/unlatch";
 
 /// Each page: its Markdown file and its address on the site. The menu lists them in this order.
-const PAGES: [(&str, &str); 8] = [
+/// The site is for people who run Unlatch; links to documents for contributors lead to GitHub.
+const PAGES: [(&str, &str); 5] = [
     ("README.md", "/"),
     ("docs/running.md", "/docs/running/"),
     ("docs/configuration.md", "/docs/configuration/"),
     ("docs/forward-auth.md", "/docs/forward-auth/"),
-    ("docs/architecture.md", "/docs/architecture/"),
-    ("docs/threat-model.md", "/docs/threat-model/"),
-    ("conformance/README.md", "/conformance/"),
     ("CHANGELOG.md", "/changelog/"),
 ];
 
