@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 - Buttons for GitHub sign-in show the GitHub mark, as Google's show Google's.
 - TOTP secrets that use SHA-256, for accounts moved from another provider. The database
