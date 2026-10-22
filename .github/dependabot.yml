@@ -12,6 +12,10 @@ updates:
     directory: /fuzz
     schedule:
       interval: weekly
+  - package-ecosystem: cargo
+    directory: /site
+    schedule:
+      interval: weekly
   - package-ecosystem: docker
     directory: /
     schedule:

@@ -1,0 +1,12 @@
+[package]
+name = "unlatch-site"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# A workspace of its own, with its own lock file and target directory.
+[workspace]
+members = ["."]
+
+[dependencies]
+pulldown-cmark = { version = "0.13.5", default-features = false, features = ["html"] }

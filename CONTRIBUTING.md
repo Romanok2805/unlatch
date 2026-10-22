@@ -43,3 +43,6 @@ maintains it and which of its features we enable. Allowed licenses and sources a
 
 Comments explain why the code is the way it is. Documentation states each fact in one place and
 links to it everywhere else.
+
+[unlatch.dev](https://unlatch.dev) is built from this Markdown by [site/](site/src/main.rs)
+on every push to `main`. `cargo run --manifest-path site/Cargo.toml` builds it into `site/out`.
