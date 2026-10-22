@@ -176,7 +176,6 @@ async fn login_page(
     if !providers.is_empty() {
         html!(content, "<div class=\"alternatives\">");
         for provider in &providers {
-            let google = provider.is_google();
             html!(
                 content,
                 "<a class=\"button block\" href=\"/login/",
@@ -185,8 +184,8 @@ async fn login_page(
                 { encode(next) },
                 "\">"
             );
-            if google {
-                html!(content, { icon("google") });
+            if let Some(logo) = super::providers::logo(provider) {
+                html!(content, { icon(logo) });
             }
             html!(
                 content,

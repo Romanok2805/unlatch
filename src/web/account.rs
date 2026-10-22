@@ -171,11 +171,10 @@ async fn provider_list(
     );
     for provider in &enabled {
         let is_linked = linked.contains(&provider.id);
-        let google = provider.is_google();
         html!(
             *out,
             "<li>",
-            { icon(if google { "google" } else { "globe" }) },
+            { icon(super::providers::logo(provider).unwrap_or("globe")) },
             "<span>",
             { provider.name },
             "</span><form method=\"post\" action=\"/account/providers\">",

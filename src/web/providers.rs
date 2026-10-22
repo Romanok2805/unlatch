@@ -87,6 +87,17 @@ pub(crate) fn redirect_uri(app: &App, slug: &str) -> String {
     app.config.issuer.url(&format!("/login/{slug}/callback"))
 }
 
+/// The provider's logo in `assets/icons.svg`, for the ones that have one.
+pub(crate) fn logo(provider: &Provider) -> Option<&'static str> {
+    if provider.is_google() {
+        Some("google")
+    } else if provider.kind == ProviderKind::Github {
+        Some("github")
+    } else {
+        None
+    }
+}
+
 /// The enabled providers, for the buttons on the sign-in page.
 pub(crate) async fn enabled(app: &App) -> Result<Vec<Provider>, Failure> {
     let all = app.db.run(|conn| providers::list(conn)).await?;

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Buttons for GitHub sign-in show the GitHub mark, as Google's show Google's.
+
 ## 0.1.0
 
 The first release.
