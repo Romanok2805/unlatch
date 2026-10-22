@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.1 - 2026-10-23
 
 - When it stops, Unlatch closes the database before exiting, so the database file is complete on
   its own and no write-ahead log is left next to it.
