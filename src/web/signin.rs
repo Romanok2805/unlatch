@@ -24,7 +24,7 @@ use crate::html::{Html, html};
 use crate::http::cookie::{self, SetCookie};
 use crate::http::{Request, Response};
 use crate::identifier::Identifier;
-use crate::log::info;
+use crate::log::{info, warning};
 use crate::secret::Secret;
 use crate::store::audit::{self, Action};
 use crate::store::users::{self, User, UserId};
@@ -260,6 +260,11 @@ pub(super) async fn submit(app: &App, request: &Request) -> Result<Response, Fai
         ""
     };
     if !app.limits.password_attempt(request.client_ip, account_key) {
+        // Someone is guessing, or locking the account out; either way the operator should know.
+        warning!(
+            "too many password attempts for {username:?} from {}",
+            request.client_ip
+        );
         let problem = Some(text.too_many_attempts);
         return login_page(app, request, &username, &next, problem, None).await;
     }
@@ -561,6 +566,11 @@ pub(super) async fn second_step_submit(
     }
     let key = checked.user.0.to_string();
     if !app.limits.code_attempt(&key) {
+        // Only someone who knows the password gets this far.
+        warning!(
+            "too many second-factor attempts for user {key} from {}",
+            request.client_ip
+        );
         return second_step_form(app, request, step, Some(text.too_many_attempts));
     }
     let input = request

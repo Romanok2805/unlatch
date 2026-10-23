@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- The log warns when sign-in attempts hit their limit and when an authorization code or refresh
+  token is used a second time, which revokes its grant. Both can mean an attack, and before they
+  were refused without a word to the operator.
+
 ## 0.3.1 - 2026-10-23
 
 - When it stops, Unlatch closes the database before exiting, so the database file is complete on

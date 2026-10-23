@@ -9,6 +9,7 @@ use crate::crypto::{TokenHash, constant_time_eq, random_bytes, sha256};
 use crate::encoding::{base64url, decode_base64_standard};
 use crate::form::decode_component;
 use crate::http::{Request, Response};
+use crate::log::warning;
 use crate::store::apps::{self, AppRecord, Kind};
 use crate::store::grants::{self, NewGrant};
 use crate::store::groups;
@@ -188,6 +189,7 @@ async fn authorization_code(
     let (key, binding) = (dpop.clone(), grant_binding(&client, dpop.as_deref()));
     let public_id = base64url(&random_bytes::<16>()?);
     let grant_name = public_id.clone();
+    let address = request.client_ip;
     let outcome = app
         .db
         .run(move |conn| {
@@ -197,6 +199,10 @@ async fn authorization_code(
             // A second use means the code leaked; whatever the first use got is revoked.
             if let Some(grant) = code.grant {
                 grants::delete(conn, grant)?;
+                warning!(
+                    "a code of {:?} was used twice, from {address}; its grant is revoked",
+                    checked.name
+                );
                 return Ok(Err("the code was already used"));
             }
             // The verifier must match the challenge, and may only come with one: accepting it for
@@ -286,6 +292,7 @@ async fn refresh(
     let now = time::now();
     let checked = client.clone();
     let key = dpop.clone();
+    let address = request.client_ip;
     let outcome = app
         .db
         .run(move |conn| {
@@ -303,6 +310,10 @@ async fn refresh(
             // An older generation means someone kept a copy of a token that was replaced.
             if generation != grant.generation || !grants::advance(conn, grant.id, generation)? {
                 grants::delete(conn, grant.id)?;
+                warning!(
+                    "a refresh token of {:?} was used twice, from {address}; its grant is revoked",
+                    checked.name
+                );
                 return Ok(Err("the refresh token was already used"));
             }
             let Some(session) = sessions::by_id(conn, grant.session, now)? else {

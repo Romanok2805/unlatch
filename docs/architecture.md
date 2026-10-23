@@ -109,7 +109,8 @@ to overload the server. For a user name that doesn't exist, Unlatch hashes a dum
 so the response time doesn't reveal which accounts exist. A password needs at least 12 characters
 and must not be a common password or the user name; as NIST SP 800-63B-4 advises, there are no rules
 about character classes. Password attempts are limited to 10 per account and 50 per address in a
-quarter hour.
+quarter hour. Attempts past a limit are refused with a warning in the log, which names the account
+and the address.
 
 The second factor is a TOTP code from an authenticator app: RFC 6238 with six digits and 30-second
 steps. Unlatch sets up SHA-1, because every app supports it, and also checks SHA-256 codes for
