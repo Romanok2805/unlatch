@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 - 2026-10-30
 
 - Signing in with a passkey on a phone: a button on the sign-in page shows a QR code at once, and
   the phone that holds the passkey scans it. The passkeys page adds a passkey on a phone the same
