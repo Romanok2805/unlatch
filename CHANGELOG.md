@@ -8,6 +8,9 @@
 - The log warns when sign-in attempts hit their limit and when an authorization code or refresh
   token is used a second time, which revokes its grant. Both can mean an attack, and before they
   were refused without a word to the operator.
+- The `ctutils` crate, which password hashing uses through `argon2`, is updated to 0.4.7 for
+  RUSTSEC-2026-0385: on some platforms, operations meant to take the same time for any secret
+  could branch on it.
 
 ## 0.3.1 - 2026-10-23
 
