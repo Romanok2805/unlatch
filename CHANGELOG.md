@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Signing in with a passkey on a phone: a button on the sign-in page shows a QR code at once, and
+  the phone that holds the passkey scans it. The passkeys page adds a passkey on a phone the same
+  way. Before, browsers offered phones only among their other choices.
 - The log warns when sign-in attempts hit their limit and when an authorization code or refresh
   token is used a second time, which revokes its grant. Both can mean an attack, and before they
   were refused without a word to the operator.

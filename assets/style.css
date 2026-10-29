@@ -434,6 +434,9 @@ div.has-tip:has(> .check, > form, > button:not(.block)) {
 }
 
 .auth .alternatives form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
   margin-top: 0;
 }
 

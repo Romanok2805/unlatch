@@ -20,8 +20,8 @@ shows how it differs from Authelia, authentik, Kanidm, Pocket ID and Rauthy.
 
 ## Features
 
-- Sign-in with a passkey, with a password and a code from an authenticator app, or with Google,
-  GitHub and other OpenID providers.
+- Sign-in with a passkey, also one on a phone through a QR code, with a password and a code from
+  an authenticator app, or with Google, GitHub and other OpenID providers.
 - OpenID Connect for applications that support it.
 - Forward authentication through nginx, Traefik or Caddy for applications that don't.
 - A web interface for applications, users, groups, sessions and sign-in providers.

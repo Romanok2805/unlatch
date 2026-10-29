@@ -38,7 +38,8 @@ it for their email domain; see [sign-in providers](providers.md#creating-account
 On their account page, which they see after signing in, people find links to the
 [applications](applications.md#adding-an-application) they may use, change their password, turn on
 two-factor sign-in with an authenticator app, get new recovery codes, add
-[passkeys](architecture.md#signing-in), see their sessions and end any of them, and
+[passkeys](architecture.md#signing-in) on their computer or, by scanning a QR code, on their phone,
+see their sessions and end any of them, and
 [link accounts](providers.md#linking-accounts) at sign-in providers.
 
 ## Groups

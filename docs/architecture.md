@@ -121,13 +121,16 @@ and per day. Users also get recovery codes.
 People can also sign in with a passkey, which replaces both the password and the code. The device
 that holds it proves it has the key, and must check the person's PIN or biometrics first, so a
 passkey alone is two factors; ID tokens then carry the `amr` values `pop` and `mfa`. Browsers offer
-saved passkeys in the username field. A passkey works only on the site it was made for, so a
-look-alike page can't use it, and it needs the issuer to be a host name rather than an IP address.
-Unlatch asks for no attestation, so any authenticator works and its make isn't checked; keys may be
-EdDSA, ES256 or RS256. Each challenge is sealed rather than stored, lasts five minutes and is
-accepted once, and a passkey whose signature counter goes back is refused as copied. Because a
-passkey is enough to sign in, adding or removing one needs a sign-in within the last ten minutes,
-so whoever finds a session left open can't add their own.
+saved passkeys in the username field. A passkey on a phone works on a computer too: a button of its
+own asks the browser to show a QR code at once, and the phone that scans it answers over Bluetooth,
+so it must be next to the computer and a photo of the code sent elsewhere is useless. A passkey
+can be made on a phone from the computer the same way. A passkey works only on the site it was
+made for, so a look-alike page can't use it, and it needs the issuer to be a host name rather than
+an IP address. Unlatch asks for no attestation, so any authenticator works and its make isn't
+checked; keys may be EdDSA, ES256 or RS256. Each challenge is sealed rather than stored, lasts
+five minutes and is accepted once, and a passkey whose signature counter goes back is refused as
+copied. Because a passkey is enough to sign in, adding or removing one needs a sign-in within the
+last ten minutes, so whoever finds a session left open can't add their own.
 
 People can sign in with any OpenID Connect provider, such as Google, and with GitHub through its
 own OAuth API. An outside account is linked to a local one by provider and subject only, and only

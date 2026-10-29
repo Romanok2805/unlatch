@@ -121,24 +121,50 @@ for (const form of document.querySelectorAll("form[data-passkey]")) {
     offerInUsernameField();
   }
 
-  const button = form.querySelector("button");
-  button.hidden = false;
-  form.querySelector("[data-passkey-unsupported]")?.setAttribute("hidden", "");
-  button.addEventListener("click", async () => {
-    if (!form.reportValidity()) {
-      return;
+  // A button with data-hint asks for a passkey on a phone: the browser shows a QR code for it at
+  // once. Phones and tablets have no other phone to scan with, and some browsers say they can't
+  // reach one, so there the button stays hidden.
+  const onPhone = matchMedia("(pointer: coarse) and (hover: none)").matches;
+  for (const button of form.querySelectorAll("button")) {
+    const hint = button.dataset.hint;
+    if (hint && onPhone) {
+      continue;
     }
-    autofill?.abort();
-    try {
-      const ask = creating ? navigator.credentials.create : navigator.credentials.get;
-      post(await ask.call(navigator.credentials, { publicKey }));
-    } catch {
-      // Cancelled, or an authenticator that is already added; the browser has said so.
-      if (autofill) {
-        offerInUsernameField();
+    button.hidden = false;
+    button.addEventListener("click", async () => {
+      if (!form.reportValidity()) {
+        return;
       }
-    }
-  });
+      autofill?.abort();
+      try {
+        const ask = creating ? navigator.credentials.create : navigator.credentials.get;
+        const credential = await ask.call(navigator.credentials, {
+          publicKey: hint ? { ...publicKey, hints: [hint] } : publicKey,
+        });
+        // A passkey made on a phone shouldn't take this computer's name.
+        const name = form.elements.name;
+        if (button.dataset.name && name && name.value === name.defaultValue) {
+          name.value = button.dataset.name;
+        }
+        post(credential);
+      } catch {
+        // Cancelled, or an authenticator that is already added; the browser has said so.
+        if (autofill) {
+          offerInUsernameField();
+        }
+      }
+    });
+  }
+  form.querySelector("[data-passkey-unsupported]")?.setAttribute("hidden", "");
+  PublicKeyCredential.getClientCapabilities?.()
+    .then((capabilities) => {
+      if (capabilities.hybridTransport === false) {
+        for (const button of form.querySelectorAll("button[data-hint=hybrid]")) {
+          button.hidden = true;
+        }
+      }
+    })
+    .catch(() => {});
 
   // Password managers that support these signals forget passkeys removed here and keep the
   // names they show up to date.

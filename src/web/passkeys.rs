@@ -149,6 +149,29 @@ fn creation_options(
     .to_string()
 }
 
+/// A button that asks the browser for a passkey on a phone. With the hint `hybrid` (WebAuthn
+/// Level 3) the browser shows a QR code at once; the phone scans it and answers over Bluetooth,
+/// which also proves it is next to this computer. Browsers that don't know the hint offer phones
+/// among their other choices. A new passkey gets `name` instead of this computer's name.
+fn phone_button(label: &str, name: Option<&str>) -> Html {
+    let mut out = Html::new();
+    html!(
+        out,
+        "<button type=\"button\" class=\"block\" data-hint=\"hybrid\""
+    );
+    if let Some(name) = name {
+        html!(out, " data-name=\"", { name }, "\"");
+    }
+    html!(
+        out,
+        " hidden>",
+        { icon("smartphone") },
+        { label },
+        "</button>"
+    );
+    out
+}
+
 /// The fields of a form that the script fills: the challenge, and the browser's answer to it.
 fn answer_fields(challenge: &str) -> Html {
     let mut out = Html::new();
@@ -161,10 +184,11 @@ fn answer_fields(challenge: &str) -> Html {
     out
 }
 
-/// The sign-in page's button for passkeys, hidden until the script finds the browser supports
-/// them; the script also offers saved passkeys in the username field. `unknown` names a passkey
-/// that the browser offered but that isn't stored here, so the script can tell the browser to
-/// stop offering it.
+/// The sign-in page's buttons for passkeys, hidden until the script finds the browser supports
+/// them: one for a passkey on this device or a security key, and one that goes straight to the
+/// QR code for a passkey on a phone. The script also offers saved passkeys in the username field.
+/// `unknown` names a passkey that the browser offered but that isn't stored here, so the script
+/// can tell the browser to stop offering it.
 pub(super) fn sign_in_form(
     app: &App,
     text: &Text,
@@ -197,7 +221,9 @@ pub(super) fn sign_in_form(
         "<button type=\"button\" class=\"block\" hidden>",
         { icon("fingerprint") },
         { text.sign_in_with_passkey },
-        "</button></form>"
+        "</button>",
+        { phone_button(text.sign_in_with_phone, None) },
+        "</form>"
     );
     Ok(out)
 }
@@ -400,7 +426,9 @@ async fn passkeys_page(
             "</p><button type=\"button\" class=\"primary block\" hidden>",
             { icon("plus") },
             { text.add_passkey },
-            "</button></form>"
+            "</button>",
+            { phone_button(text.add_on_phone, Some(text.phone)) },
+            "</form>"
         );
     }
     html!(
