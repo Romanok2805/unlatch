@@ -1,7 +1,7 @@
 # A static binary built on Alpine, run from an empty image as an unprivileged user.
 # docs/running.md shows how to run it; the release workflow builds it for amd64 and arm64.
 
-FROM rust:1.99.1-alpine3.24 AS build
+FROM rust:1.100.0-alpine3.24 AS build
 RUN apk add --no-cache build-base cmake perl
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
